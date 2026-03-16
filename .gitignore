@@ -1,0 +1,8 @@
+node_modules/
+.env
+config.json
+mcp-config.json
+worker/state.json
+worker/tmp/
+worker/history/
+server/

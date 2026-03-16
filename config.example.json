@@ -1,0 +1,8 @@
+{
+  "botToken": "YOUR_BOT_TOKEN",
+  "chatId": "YOUR_CHAT_ID",
+  "groqApiKey": "YOUR_GROQ_API_KEY",
+  "timeoutMs": 300000,
+  "claudeTimeoutMs": 1800000,
+  "tokenRotationLimit": 100000
+}
