@@ -1460,7 +1460,8 @@ async function handleMessage(msg) {
   }
 
   if (text === "/sleep") {
-    execSync("pmset sleepnow");
+    await tg("sendMessage", { chat_id: chatId, text: t("sleep.going") });
+    setTimeout(() => { try { execSync("pmset sleepnow"); } catch {} }, 1000);
     return;
   }
   if (text === "/lock") {
