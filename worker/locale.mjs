@@ -65,7 +65,7 @@ const locales = {
     // ── Help ──
     "help.header": "🤖 <b>TG Claude</b>\n\n",
     "help.sessions": "<b>Sessions:</b>\n/sessions — list\n/new [name] — new session\n/name [title] — rename\n/detach — disconnect\n\n",
-    "help.control": "<b>Control:</b>\n/stop — stop Claude\n/status — mode, model, session, tokens\n/git — git panel (status/diff/log/push)\n/undo — rollback last commit\n/plan — toggle Plan/Build mode\n/screenshot URL — take screenshot\n/cost — session cost\n/model — sonnet/opus/haiku\n/mode — terminal/hybrid/telegram\n/lang — voice language (ru/en/auto)\n/botlang — bot UI language\n/cd — working directory\n/setup — re-run setup wizard\n\n",
+    "help.control": "<b>Control:</b>\n/stop — stop Claude\n/status — mode, model, session, tokens (scope + total)\n/git — git panel (status/diff/log/push)\n/undo — rollback last commit\n/plan — toggle Plan/Build mode\n/screenshot URL — take screenshot\n/model — sonnet/opus/haiku\n/mode — terminal/hybrid/telegram\n/lang — voice language (ru/en/auto)\n/botlang — bot UI language\n/cd — working directory\n/setup — re-run setup wizard\n\n",
     "help.quick": "<b>Quick:</b>\n/sh [cmd] — shell without Claude\n/sys — CPU, RAM, disk, battery\n/clip — clipboard (get/set)\n/dl [path] — download file\n/cron 2h text — reminder\n\n",
     "help.mac": "<b>Mac:</b>\n/sleep · /lock · /shutdown · /reboot\n\n",
     "help.footer": "📎 Photo/files → Claude analyzes\n🎤 Voice → Groq STT → Claude\n↩️ Forwarded → Claude analyzes\n💬 Claude can message you (MCP)",
@@ -254,7 +254,7 @@ const locales = {
     // ── Help ──
     "help.header": "🤖 <b>TG Claude</b>\n\n",
     "help.sessions": "<b>Сессии:</b>\n/sessions — список\n/new [имя] — новая сессия\n/name [имя] — переименовать\n/detach — отключиться\n\n",
-    "help.control": "<b>Управление:</b>\n/stop — остановить Claude\n/status — режим, модель, сессия, токены\n/git — git панель (status/diff/log/push)\n/undo — откатить последний коммит\n/plan — переключить Plan/Build режим\n/screenshot URL — скриншот страницы\n/cost — стоимость сессии\n/model — sonnet/opus/haiku\n/mode — terminal/hybrid/telegram\n/lang — язык голоса (ru/en/auto)\n/botlang — язык интерфейса\n/cd — рабочая директория\n/setup — повторная настройка\n\n",
+    "help.control": "<b>Управление:</b>\n/stop — остановить Claude\n/status — режим, модель, сессия, токены (скоуп + total)\n/git — git панель (status/diff/log/push)\n/undo — откатить последний коммит\n/plan — переключить Plan/Build режим\n/screenshot URL — скриншот страницы\n/model — sonnet/opus/haiku\n/mode — terminal/hybrid/telegram\n/lang — язык голоса (ru/en/auto)\n/botlang — язык интерфейса\n/cd — рабочая директория\n/setup — повторная настройка\n\n",
     "help.quick": "<b>Быстрые:</b>\n/sh [cmd] — shell без Claude\n/sys — CPU, RAM, диск, батарея\n/clip — буфер обмена (get/set)\n/dl [path] — скачать файл\n/cron 2h текст — напоминание\n\n",
     "help.mac": "<b>Mac:</b>\n/sleep · /lock · /shutdown · /reboot\n\n",
     "help.footer": "📎 Фото/файлы → Claude анализирует\n🎤 Голосовое → Groq STT → Claude\n↩️ Форвард сообщения → Claude анализирует\n💬 Claude может сам писать в чат (MCP)",

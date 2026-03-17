@@ -1381,14 +1381,6 @@ async function handleMessage(msg) {
     }
     return;
   }
-  if (text === "/cost") {
-    const { input, output } = getTokens();
-    await tg("sendMessage", {
-      chat_id: chatId,
-      text: t("cmd.cost", { input: formatK(input), output: formatK(output), total: formatK(input + output) }),
-    });
-    return;
-  }
   if (text === "/status") {
     const { input, output } = getTokens();
     const { activeSessionId } = getActiveSession();
