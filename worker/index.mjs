@@ -1085,13 +1085,14 @@ async function sendToClaude(chatId, prompt) {
   }
 
   // Track tokens
+  const sessionKey = result.sessionId || null;
   let tokenInfo = "";
   let shouldRotate = false;
   if (result.usage) {
     const inp = result.usage.input_tokens || 0;
     const out = result.usage.output_tokens || 0;
-    addTokens(inp, out);
-    const scopeTotal = getScopeTokens();
+    addTokens(inp, out, sessionKey);
+    const scopeTotal = getScopeTokens(sessionKey);
     const rotLimit = getTokenRotationLimit();
     const bar = rotLimit > 0 ? tokenProgressBar(scopeTotal, rotLimit) : `${formatK(scopeTotal)}`;
     tokenInfo = `\n\n_↓${formatK(inp)} ↑${formatK(out)} · ${elapsed}s · ${bar}_`;
@@ -1138,12 +1139,12 @@ async function sendToClaude(chatId, prompt) {
       );
       const summary = summaryResult.output || t("cmd.no_data");
       clearActiveSession();
-      resetScopeTokens();
+      resetScopeTokens(sessionKey);
       await enqueue(chatId, t("rotation.continue", { summary }));
     } catch (err) {
       console.error("Session rotation error:", err.message);
       clearActiveSession();
-      resetScopeTokens();
+      resetScopeTokens(sessionKey);
     }
   }
 }
@@ -1390,8 +1391,8 @@ async function handleMessage(msg) {
   }
   if (text === "/status") {
     const { input, output } = getTokens();
-    const scopeTotal = getScopeTokens();
     const { activeSessionId } = getActiveSession();
+    const scopeTotal = getScopeTokens(activeSessionId);
     const sessionName = activeSessionId
       ? (getSessionName(activeSessionId) || activeSessionId.slice(0, 8) + "…")
       : t("status.no_session");

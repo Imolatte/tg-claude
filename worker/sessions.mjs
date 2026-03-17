@@ -67,14 +67,15 @@ export function setCustomCwd(dir) {
   saveState(state);
 }
 
-export function addTokens(input, output) {
+export function addTokens(input, output, sessionId) {
   const state = getState();
   if (!state.tokens) state.tokens = { input: 0, output: 0 };
   state.tokens.input += input;
   state.tokens.output += output;
   if (!state.scopeTokens) state.scopeTokens = {};
-  if (!state.scopeTokens.default) state.scopeTokens.default = 0;
-  state.scopeTokens.default += input + output;
+  const key = sessionId || "default";
+  if (!state.scopeTokens[key]) state.scopeTokens[key] = 0;
+  state.scopeTokens[key] += input + output;
   saveState(state);
 }
 
@@ -83,21 +84,24 @@ export function getTokens() {
   return state.tokens || { input: 0, output: 0 };
 }
 
-export function getScopeTokens() {
+export function getScopeTokens(sessionId) {
   const state = getState();
-  return state.scopeTokens?.default || 0;
+  const key = sessionId || "default";
+  return state.scopeTokens?.[key] || 0;
 }
 
-export function resetScopeTokens() {
+export function resetScopeTokens(sessionId) {
   const state = getState();
   if (!state.scopeTokens) state.scopeTokens = {};
-  state.scopeTokens.default = 0;
+  const key = sessionId || "default";
+  state.scopeTokens[key] = 0;
   saveState(state);
 }
 
 export function resetTokens() {
   const state = getState();
   state.tokens = { input: 0, output: 0 };
+  state.scopeTokens = {};
   saveState(state);
 }
 
