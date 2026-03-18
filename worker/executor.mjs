@@ -7,9 +7,11 @@ import { getActiveSession, getModel, getCustomCwd, clearActiveSession } from "./
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let _configTimeout = 1800000; // 30 min default
+let _ownerChatId = null;
 try {
   const cfg = JSON.parse(readFileSync(join(__dirname, "..", "config.json"), "utf-8"));
   if (cfg.claudeTimeoutMs) _configTimeout = cfg.claudeTimeoutMs;
+  if (cfg.chatId) _ownerChatId = String(cfg.chatId);
 } catch {}
 const CLAUDE_TIMEOUT = parseInt(process.env.CLAUDE_TIMEOUT || String(_configTimeout), 10);
 const DEFAULT_CWD = process.env.DEFAULT_CWD || homedir();
@@ -164,7 +166,17 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd } = {}) {
  * Run Claude. If --resume fails, retry without it (stale session).
  */
 export async function runClaude(prompt, onEvent, chatId = "default") {
-  const { activeSessionId, activeCwd } = getActiveSession(chatId);
+  let { activeSessionId, activeCwd } = getActiveSession(chatId);
+
+  // If no active session for this chat, fall back to owner's DM session
+  if (!activeSessionId && _ownerChatId && chatId !== _ownerChatId) {
+    const ownerSession = getActiveSession(_ownerChatId);
+    if (ownerSession.activeSessionId) {
+      activeSessionId = ownerSession.activeSessionId;
+      activeCwd = ownerSession.activeCwd || activeCwd;
+    }
+  }
+
   const cwd = getCustomCwd() || activeCwd || DEFAULT_CWD;
 
   console.log(`🚀 runClaude chat=${chatId} session=${activeSessionId?.slice(0,8) || "none"} cwd=${cwd} prompt=${prompt.slice(0,60)}`);

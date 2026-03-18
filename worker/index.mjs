@@ -10,6 +10,18 @@ import { execSync, execFile } from "child_process";
 import { join, dirname, extname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
+import { createServer } from "net";
+
+// Single-instance lock via TCP port — only one process can hold it
+const LOCK_PORT = 47291;
+const lockServer = createServer();
+await new Promise((resolve, reject) => {
+  lockServer.listen(LOCK_PORT, "127.0.0.1", resolve);
+  lockServer.on("error", () => {
+    console.error(`[lock] Another instance is already running on port ${LOCK_PORT}. Exiting.`);
+    process.exit(0);
+  });
+});
 
 const HOME = homedir();
 import { runClaude, killActiveChild } from "./executor.mjs";
@@ -190,8 +202,12 @@ function splitMarkdown(text, limit = 4000) {
   return chunks;
 }
 
+function stripSystemTags(text) {
+  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+}
+
 async function sendMsg(chatId, text) {
-  const chunks = splitMarkdown(text);
+  const chunks = splitMarkdown(stripSystemTags(text));
   for (const chunk of chunks) {
     if (!chunk.trim()) continue;
     const res = await tg("sendMessage", {
@@ -1155,8 +1171,10 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   let isWritingResponse = false;
   let streamMsgId = null;
   let thoughtsBuffer = "";
+  let mcpSent = false;
 
-  async function createOrUpdateStreamMsg(text) {
+  async function createOrUpdateStreamMsg(rawText) {
+    const text = stripSystemTags(rawText);
     if (!streamMsgId) {
       const res = await tg("sendMessage", { chat_id: chatId, text, disable_notification: true });
       streamMsgId = res?.result?.message_id || null;
@@ -1219,6 +1237,7 @@ async function sendToClaude(chatId, prompt, meta = {}) {
               if (detail) trackRecentFile(detail, block.name);
             }
             else if (block.name === "Agent") detail = input.description || "";
+            else if (block.name === "send_telegram" || block.name === "send_file_telegram") { mcpSent = true; continue; }
             else detail = Object.values(input).join(" ").slice(0, 40);
 
             const toolLine = `🔧 ${block.name}${detail ? ": " + detail : ""}`;
@@ -1304,6 +1323,8 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   if (streamMsgId) {
     if (displayMode === "tools" && toolLines.length > 0) {
       tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: toolLines.join("\n") }).catch(() => {});
+    } else if (displayMode === "thoughts" && thoughtsBuffer) {
+      tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: `💭 ${thoughtsBuffer}` }).catch(() => {});
     } else {
       await tg("deleteMessage", { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
     }
@@ -1326,7 +1347,10 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     return;
   }
 
-  await sendMsg(chatId, result.output + tokenInfo);
+  // Skip sending result.output if Claude already sent response via MCP send_telegram
+  if (!mcpSent) {
+    await sendMsg(chatId, result.output + tokenInfo);
+  }
 
   // Ask user what to do when token limit reached
   if (shouldRotate) {
@@ -2183,16 +2207,6 @@ async function poll() {
 async function init() {
   while (true) {
     try {
-      // Kill ALL previous instances (not just PID file)
-      try {
-        const myPid = String(process.pid);
-        const pids = execSync("pgrep -f 'node index.mjs'", { encoding: "utf-8" }).trim().split("\n").filter(p => p && p !== myPid);
-        if (pids.length) {
-          execSync(`kill -9 ${pids.join(" ")} 2>/dev/null || true`);
-          console.log(`☠️ Killed ${pids.length} previous instance(s)`);
-        }
-      } catch {}
-
       await tg("deleteWebhook", {});
       const me = await tg("getMe", {});
       if (me.ok) botUsername = me.result.username;
