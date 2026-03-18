@@ -105,6 +105,30 @@ export function resetTokens() {
   saveState(state);
 }
 
+// ── Allowed users (for group chats) ─────────────────────────────────
+
+export function getAllowedUsers() {
+  return getState().allowedUsers || [];
+}
+
+export function addAllowedUser(userId) {
+  const state = getState();
+  if (!state.allowedUsers) state.allowedUsers = [];
+  const id = String(userId);
+  if (!state.allowedUsers.includes(id)) {
+    state.allowedUsers.push(id);
+    saveState(state);
+  }
+}
+
+export function removeAllowedUser(userId) {
+  const state = getState();
+  if (!state.allowedUsers) return;
+  const id = String(userId);
+  state.allowedUsers = state.allowedUsers.filter((u) => u !== id);
+  saveState(state);
+}
+
 export function setModel(model) {
   if (!VALID_MODELS.includes(model)) return false;
   const state = getState();

@@ -22,6 +22,7 @@ import {
   getWorkingDir,
   getTokenRotationLimit, setTokenRotationLimit, isSetupDone, markSetupDone,
   getOs, setOs,
+  getAllowedUsers, addAllowedUser, removeAllowedUser,
 } from "./sessions.mjs";
 import { t, getLang, setLang, loadLang, availableLangs } from "./locale.mjs";
 
@@ -1162,11 +1163,36 @@ async function sendToClaude(chatId, prompt) {
 
 // ── Message handler ─────────────────────────────────────────────────
 
+function isGroupChat(msg) {
+  return msg.chat.type === "group" || msg.chat.type === "supergroup";
+}
+
+function isBotMentioned(msg) {
+  if (!botUsername) return false;
+  const text = msg.text || msg.caption || "";
+  if (text.toLowerCase().includes(`@${botUsername.toLowerCase()}`)) return true;
+  // Reply to bot's message
+  if (msg.reply_to_message?.from?.username?.toLowerCase() === botUsername.toLowerCase()) return true;
+  return false;
+}
+
+function isAuthorized(msg) {
+  const senderId = String(msg.from?.id || "");
+  if (senderId === OWNER_CHAT_ID) return true;
+  return getAllowedUsers().includes(senderId);
+}
+
 async function handleMessage(msg) {
   const chatId = String(msg.chat.id);
 
-  // Owner-only bot
-  if (chatId !== OWNER_CHAT_ID) return;
+  if (isGroupChat(msg)) {
+    // In groups: only authorized users, only when mentioned or replying to bot
+    if (!isAuthorized(msg)) return;
+    if (!isBotMentioned(msg)) return;
+  } else {
+    // In DM: owner only
+    if (chatId !== OWNER_CHAT_ID) return;
+  }
 
   console.log(`📩 text=${(msg.text||msg.caption||"").slice(0,50)} fwd=${!!(msg.forward_origin||msg.forward_from)} hasDoc=${!!msg.document} hasPhoto=${!!msg.photo}`);
 
@@ -1311,9 +1337,9 @@ async function handleMessage(msg) {
   let text = msg.text;
   if (!text) return;
 
-  // Strip @botname from commands in groups (e.g. /sessions@andrey_claudeAi_bot → /sessions)
-  if (botUsername && text.startsWith("/")) {
-    text = text.replace(new RegExp(`@${botUsername}\\b`, "i"), "");
+  // Strip @botname from text (commands and regular messages in groups)
+  if (botUsername) {
+    text = text.replace(new RegExp(`@${botUsername}\\b`, "gi"), "").trim();
   }
 
   // Commands
@@ -1325,6 +1351,37 @@ async function handleMessage(msg) {
     return;
   }
   if (text === "/sessions" || text === "📂 sessions") { await showSessions(chatId); return; }
+  // ── Allowed users management (owner only) ──
+  if (text.startsWith("/allow") || text.startsWith("/revoke") || text === "/allowed") {
+    if (chatId !== OWNER_CHAT_ID && String(msg.from?.id) !== OWNER_CHAT_ID) {
+      await tg("sendMessage", { chat_id: chatId, text: "❌ Owner only." });
+      return;
+    }
+    if (text === "/allowed") {
+      const users = getAllowedUsers();
+      await tg("sendMessage", {
+        chat_id: chatId,
+        text: users.length ? `👥 Allowed users:\n${users.map((u) => `• <code>${u}</code>`).join("\n")}` : "👥 No allowed users.",
+        parse_mode: "HTML",
+      });
+      return;
+    }
+    if (text.startsWith("/allow ")) {
+      const userId = text.slice(7).trim().replace(/^@/, "");
+      if (!userId) { await tg("sendMessage", { chat_id: chatId, text: "Usage: /allow <user_id>" }); return; }
+      addAllowedUser(userId);
+      await tg("sendMessage", { chat_id: chatId, text: `✅ User <code>${esc(userId)}</code> allowed.`, parse_mode: "HTML" });
+      return;
+    }
+    if (text.startsWith("/revoke ")) {
+      const userId = text.slice(8).trim().replace(/^@/, "");
+      if (!userId) { await tg("sendMessage", { chat_id: chatId, text: "Usage: /revoke <user_id>" }); return; }
+      removeAllowedUser(userId);
+      await tg("sendMessage", { chat_id: chatId, text: `✅ User <code>${esc(userId)}</code> removed.`, parse_mode: "HTML" });
+      return;
+    }
+  }
+
   if (text === "/stop") {
     if (killActiveChild()) {
       getChatQueue(chatId).busy = false;
