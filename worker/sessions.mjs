@@ -21,23 +21,44 @@ function saveState(state) {
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
 }
 
-export function getActiveSession() {
-  return getState();
+function migrateState(state) {
+  // Migrate from flat activeSessionId to per-chat activeSessions
+  if (!state.activeSessions) {
+    state.activeSessions = {};
+    if (state.activeSessionId) {
+      state.activeSessions["default"] = {
+        sessionId: state.activeSessionId,
+        projectDir: state.activeProjectDir || null,
+        cwd: state.activeCwd || null,
+      };
+    }
+    delete state.activeSessionId;
+    delete state.activeProjectDir;
+    delete state.activeCwd;
+  }
+  return state;
 }
 
-export function setActiveSession(sessionId, projectDir, cwd) {
-  const state = getState();
-  state.activeSessionId = sessionId;
-  state.activeProjectDir = projectDir;
-  if (cwd) state.activeCwd = cwd;
+export function getActiveSession(chatId = "default") {
+  const state = migrateState(getState());
+  const s = state.activeSessions?.[chatId] || {};
+  return {
+    activeSessionId: s.sessionId || null,
+    activeProjectDir: s.projectDir || null,
+    activeCwd: s.cwd || null,
+  };
+}
+
+export function setActiveSession(sessionId, projectDir, cwd, chatId = "default") {
+  const state = migrateState(getState());
+  if (!state.activeSessions) state.activeSessions = {};
+  state.activeSessions[chatId] = { sessionId, projectDir: projectDir || null, cwd: cwd || null };
   saveState(state);
 }
 
-export function clearActiveSession() {
-  const state = getState();
-  state.activeSessionId = null;
-  state.activeProjectDir = null;
-  state.activeCwd = null;
+export function clearActiveSession(chatId = "default") {
+  const state = migrateState(getState());
+  if (state.activeSessions) delete state.activeSessions[chatId];
   saveState(state);
 }
 

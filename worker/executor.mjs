@@ -163,19 +163,18 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd } = {}) {
 /**
  * Run Claude. If --resume fails, retry without it (stale session).
  */
-export async function runClaude(prompt, onEvent) {
-  const { activeSessionId } = getActiveSession();
-  const state = getActiveSession();
-  const cwd = getCustomCwd() || state.activeCwd || DEFAULT_CWD;
+export async function runClaude(prompt, onEvent, chatId = "default") {
+  const { activeSessionId, activeCwd } = getActiveSession(chatId);
+  const cwd = getCustomCwd() || activeCwd || DEFAULT_CWD;
 
-  console.log(`🚀 runClaude session=${activeSessionId?.slice(0,8) || "none"} cwd=${cwd} prompt=${prompt.slice(0,60)}`);
+  console.log(`🚀 runClaude chat=${chatId} session=${activeSessionId?.slice(0,8) || "none"} cwd=${cwd} prompt=${prompt.slice(0,60)}`);
   const result = await spawnClaude(prompt, onEvent, { sessionId: activeSessionId, cwd });
   console.log(`🏁 runClaude done exit=${result.exitCode} success=${result.success}`);
 
   // If resume failed — retry as new session
   if (!result.success && activeSessionId && result.exitCode === 1) {
     console.log("⚠️ Resume failed, retrying as new session…");
-    clearActiveSession();
+    clearActiveSession(chatId);
     return spawnClaude(prompt, onEvent, { cwd });
   }
 

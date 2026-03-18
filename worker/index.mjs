@@ -237,9 +237,9 @@ async function downloadTgFile(fileId, ext) {
 
 // ── Commands ────────────────────────────────────────────────────────
 
-function buildSessionList() {
+function buildSessionList(chatId = "default") {
   const sessions = listSessions(7);
-  const { activeSessionId } = getActiveSession();
+  const { activeSessionId } = getActiveSession(chatId);
 
   if (sessions.length === 0) return { text: t("sessions.empty"), buttons: [] };
 
@@ -270,7 +270,7 @@ function buildSessionList() {
 }
 
 async function showSessions(chatId) {
-  const { text, buttons } = buildSessionList();
+  const { text, buttons } = buildSessionList(chatId);
   await tg("sendMessage", {
     chat_id: chatId,
     text,
@@ -280,7 +280,7 @@ async function showSessions(chatId) {
 }
 
 async function editSessionList(chatId, messageId) {
-  const { text, buttons } = buildSessionList();
+  const { text, buttons } = buildSessionList(chatId);
   await tg("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
@@ -410,7 +410,7 @@ async function showWelcome(chatId, userLangCode) {
 }
 
 async function showHelp(chatId) {
-  const { activeSessionId } = getActiveSession();
+  const { activeSessionId } = getActiveSession(chatId);
   const sessions = listSessions(10);
   const current = sessions.find((s) => s.sessionId === activeSessionId);
 
@@ -443,8 +443,8 @@ async function showHelp(chatId) {
 
 // ── Git helpers ─────────────────────────────────────────────────────
 
-function getGitCwd() {
-  const state = getActiveSession();
+function getGitCwd(chatId = "default") {
+  const state = getActiveSession(chatId);
   return getCustomCwd() || state.activeCwd || `${HOME}/develop`;
 }
 
@@ -526,7 +526,7 @@ async function handleCallback(cb) {
   const chatId = String(cb.message?.chat?.id || OWNER_CHAT_ID);
 
   if (data === "ses:new") {
-    clearActiveSession("default");
+    clearActiveSession(chatId);
     await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.new_btn") });
     await tg("editMessageText", {
       chat_id: chatId,
@@ -538,7 +538,7 @@ async function handleCallback(cb) {
   }
 
   if (data === "ses:detach") {
-    clearActiveSession("default");
+    clearActiveSession(chatId);
     await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.detach_btn") });
     await tg("editMessageText", {
       chat_id: chatId,
@@ -982,7 +982,7 @@ async function handleCallback(cb) {
 
     if (match) {
       const matchCwd = getWorkingDir(match.projectDir);
-      setActiveSession(match.sessionId, match.projectDir, matchCwd, "default");
+      setActiveSession(match.sessionId, match.projectDir, matchCwd, chatId);
       const title = match.displayName || match.projectName;
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: `▶️ ${title}` });
       await tg("editMessageText", {
@@ -1145,19 +1145,19 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     }
   };
 
-  const sessionIdBeforeRun = getActiveSession().activeSessionId;
-  const result = await runClaude(prompt, onEvent);
+  const sessionIdBeforeRun = getActiveSession(chatId).activeSessionId;
+  const result = await runClaude(prompt, onEvent, chatId);
   clearInterval(statusInterval);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
   // Auto-save session for continuity — but only if user didn't manually switch session while Claude was running
   if (result.sessionId) {
-    const currentSession = getActiveSession().activeSessionId;
+    const currentSession = getActiveSession(chatId).activeSessionId;
     const sessionChangedByUser = currentSession !== sessionIdBeforeRun && currentSession !== result.sessionId;
     if (!sessionChangedByUser) {
-      const projDir = result.projectDir || getActiveSession().activeProjectDir || "";
-      const savedCwd = result.cwd || getActiveSession().activeCwd;
-      setActiveSession(result.sessionId, projDir, savedCwd);
+      const projDir = result.projectDir || getActiveSession(chatId).activeProjectDir || "";
+      const savedCwd = result.cwd || getActiveSession(chatId).activeCwd;
+      setActiveSession(result.sessionId, projDir, savedCwd, chatId);
       if (pendingSessionName) {
         renameSession(result.sessionId, pendingSessionName);
         console.log(`📎 Session: ${result.sessionId.slice(0, 8)}… "${pendingSessionName}" cwd=${savedCwd}`);
@@ -1241,12 +1241,12 @@ async function sendToClaude(chatId, prompt, meta = {}) {
         () => {}
       );
       const summary = summaryResult.output || t("cmd.no_data");
-      clearActiveSession();
+      clearActiveSession(chatId);
       resetScopeTokens(sessionKey);
       await enqueue(chatId, t("rotation.continue", { summary }));
     } catch (err) {
       console.error("Session rotation error:", err.message);
-      clearActiveSession();
+      clearActiveSession(chatId);
       resetScopeTokens(sessionKey);
     }
   }
@@ -1471,18 +1471,24 @@ async function handleMessage(msg) {
       });
       return;
     }
-    if (text.startsWith("/allow ")) {
-      const userId = text.slice(7).trim().replace(/^@/, "");
-      if (!userId) { await tg("sendMessage", { chat_id: chatId, text: "Usage: /allow <user_id>" }); return; }
+    if (text.startsWith("/allow")) {
+      const arg = text.slice(6).trim().replace(/^@/, "");
+      const replyUserId = String(msg.reply_to_message?.from?.id || "");
+      const userId = arg || replyUserId;
+      if (!userId) { await tg("sendMessage", { chat_id: chatId, text: "Usage: /allow <user_id> or reply to a user's message" }); return; }
+      const displayName = arg ? userId : (msg.reply_to_message?.from?.first_name || userId);
       addAllowedUser(userId);
-      await tg("sendMessage", { chat_id: chatId, text: `✅ User <code>${esc(userId)}</code> allowed.`, parse_mode: "HTML" });
+      await tg("sendMessage", { chat_id: chatId, text: `✅ <b>${esc(displayName)}</b> (<code>${esc(userId)}</code>) allowed.`, parse_mode: "HTML" });
       return;
     }
-    if (text.startsWith("/revoke ")) {
-      const userId = text.slice(8).trim().replace(/^@/, "");
-      if (!userId) { await tg("sendMessage", { chat_id: chatId, text: "Usage: /revoke <user_id>" }); return; }
+    if (text.startsWith("/revoke")) {
+      const arg = text.slice(7).trim().replace(/^@/, "");
+      const replyUserId = String(msg.reply_to_message?.from?.id || "");
+      const userId = arg || replyUserId;
+      if (!userId) { await tg("sendMessage", { chat_id: chatId, text: "Usage: /revoke <user_id> or reply to a user's message" }); return; }
+      const displayName = arg ? userId : (msg.reply_to_message?.from?.first_name || userId);
       removeAllowedUser(userId);
-      await tg("sendMessage", { chat_id: chatId, text: `✅ User <code>${esc(userId)}</code> removed.`, parse_mode: "HTML" });
+      await tg("sendMessage", { chat_id: chatId, text: `✅ <b>${esc(displayName)}</b> (<code>${esc(userId)}</code>) removed.`, parse_mode: "HTML" });
       return;
     }
   }
@@ -1497,13 +1503,13 @@ async function handleMessage(msg) {
     return;
   }
   if (text === "/detach") {
-    clearActiveSession("default");
+    clearActiveSession(chatId);
     await tg("sendMessage", { chat_id: chatId, text: t("sessions.detached") });
     return;
   }
   if (text.startsWith("/new")) {
     const name = text.slice(4).trim();
-    clearActiveSession("default");
+    clearActiveSession(chatId);
     resetTokens();
     if (name) {
       pendingSessionName = name;
@@ -1515,7 +1521,7 @@ async function handleMessage(msg) {
   }
   if (text.startsWith("/name")) {
     const name = text.slice(5).trim();
-    const { activeSessionId } = getActiveSession("default");
+    const { activeSessionId } = getActiveSession(chatId);
     if (!activeSessionId) {
       await tg("sendMessage", { chat_id: chatId, text: t("sessions.no_active") });
       return;
@@ -1587,12 +1593,12 @@ async function handleMessage(msg) {
   }
   if (text === "/status") {
     const { input, output } = getTokens();
-    const { activeSessionId } = getActiveSession();
+    const { activeSessionId, activeCwd } = getActiveSession(chatId);
     const scopeTotal = getScopeTokens(activeSessionId);
     const sessionName = activeSessionId
       ? (getSessionName(activeSessionId) || activeSessionId.slice(0, 8) + "…")
       : t("status.no_session");
-    const cwd = getCustomCwd() || getActiveSession().activeCwd || HOME;
+    const cwd = getCustomCwd() || activeCwd || HOME;
     const mode = getOutputMode();
     const model = getModel();
     const rotLimit = getTokenRotationLimit();
