@@ -606,20 +606,6 @@ async function handleCallback(cb) {
     return;
   }
 
-  // ── Display mode selection ──
-  if (data.startsWith("display:")) {
-    const mode = data.split(":")[1];
-    setDisplayMode(mode);
-    await tg("answerCallbackQuery", { callback_query_id: cb.id, text: `✅ ${mode}` });
-    await tg("editMessageText", {
-      chat_id: chatId,
-      message_id: cb.message.message_id,
-      text: t("cmd.display_set", { mode: esc(mode) }),
-      parse_mode: "HTML",
-    });
-    return;
-  }
-
   // ── Voice language selection ──
   if (data.startsWith("lang:")) {
     const lang = data.split(":")[1];
@@ -1581,37 +1567,6 @@ async function handleMessage(msg) {
     }
     return;
   }
-  if (text.startsWith("/display")) {
-    // Owner only, disabled in groups
-    if (isGroupChat(msg)) {
-      await tg("sendMessage", { chat_id: chatId, text: t("cmd.display_group"), parse_mode: "HTML" });
-      return;
-    }
-    if (chatId !== OWNER_CHAT_ID) return;
-    const arg = text.slice(8).trim().toLowerCase();
-    if (!arg) {
-      const current = getDisplayMode();
-      await tg("sendMessage", {
-        chat_id: chatId,
-        text: t("cmd.display_current", { mode: current }),
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [[
-            { text: `${current === "tools" ? "▶️ " : ""}🔧 Tools`, callback_data: "display:tools" },
-            { text: `${current === "thoughts" ? "▶️ " : ""}💭 Thoughts`, callback_data: "display:thoughts" },
-          ]],
-        },
-      });
-      return;
-    }
-    if (arg === "tools" || arg === "thoughts") {
-      setDisplayMode(arg);
-      await tg("sendMessage", { chat_id: chatId, text: t("cmd.display_set", { mode: arg }), parse_mode: "HTML" });
-    } else {
-      await tg("sendMessage", { chat_id: chatId, text: t("error.invalid_display") });
-    }
-    return;
-  }
   if (text === "/status") {
     const { input, output } = getTokens();
     const { activeSessionId } = getActiveSession();
@@ -2055,7 +2010,7 @@ async function handleMessage(msg) {
     delete pendingDMText[chatId];
     enqueue(chatId, finalPrompt, requestMeta);
   }, 1500);
-  pendingDMText[chatId] = { prompt: finalPrompt, timer, meta: requestMeta };
+  pendingDMText[chatId] = { prompt: finalPrompt, timer };
   return;
 }
 

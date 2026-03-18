@@ -6,7 +6,7 @@
 
 Personal Telegram bot that turns your Mac into a remote Claude Code terminal. Send messages from your phone — get full Claude Code CLI responses with tool access (Bash, Read, Write, Edit, Grep, etc.).
 
-**Owner-first.** One bot, one Mac, one Telegram owner. Groups supported — add the bot to any group and authorized members can ask Claude questions; dangerous operations still require owner approval.
+**Single-user, owner-only by default.** Designed for developers who want to control their own machine remotely. Group chats are supported with explicit allow-list control.
 
 Not an API wrapper. Spawns the real Claude Code CLI process.
 
@@ -41,16 +41,24 @@ cd worker && npm install && node index.mjs
 
 ### Display Modes
 
-Two modes for showing Claude's work in progress (switch with `/display`):
+Control what you see while Claude works:
 
-| Mode | What you see |
-|------|-------------|
-| `tools` | Tool calls in real time: `🔧 Read: /src/auth.ts`, `🔧 Bash: npm test` |
-| `thoughts` | Streaming text reasoning: `💭 I need to check if the function…` |
+| Mode | What is shown |
+|------|---------------|
+| `tools` | Tool calls with file/command details: `🔧 Read: /src/auth.ts` |
+| `thoughts` | Claude's text output streamed as it reasons through the task |
 
-Groups always use `thoughts` mode. DM defaults to `tools`, configurable.
+Switch anytime with `/display` or set during the setup wizard. Groups always use `thoughts` mode.
 
-Token usage shown after each response: `↓3.2k ↑17k · 4.5s`
+**Tools mode example:**
+```
+🔧 Read: /src/auth.ts
+🔧 Edit: /src/auth.ts
+🔧 Bash: npm test
+📝 Writing response...
+```
+
+**Thoughts mode:** shows Claude's running text output streamed live into a single updating message.
 
 ### Session Management
 - Auto-resume sessions across messages (`--resume`)
@@ -59,64 +67,105 @@ Token usage shown after each response: `↓3.2k ↑17k · 4.5s`
 - `/detach` — disconnect; `/cd <path>` — change working directory
 - Auto-rotation at configurable token limit (summarizes context, starts fresh — set via `/setup`)
 
-### Commands
+---
+
+## Commands
+
+### Session Commands
+
+| Command | Description |
+|---------|-------------|
+| `/sessions` | Session list with connect/delete buttons |
+| `/new [name]` | Start a new session (optionally named) |
+| `/name <title>` | Rename the current session |
+| `/detach` | Disconnect from current session |
+
+### Control Commands
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Full command reference |
 | `/status` | Mode, model, session, cwd, token progress bar |
 | `/setup` | Re-run first-time setup wizard |
-| `/sessions` | Session list with connect/delete buttons |
-| `/new [name]` | New session |
-| `/name <title>` | Rename session |
 | `/stop` | Kill running Claude process |
-| `/status` | Mode, model, session, cwd, token scope + total |
-| `/model` | Switch: sonnet / opus / haiku |
+| `/model` | Switch: sonnet / opus / haiku (inline buttons) |
 | `/mode` | Output mode: terminal / hybrid / telegram |
-| `/display` | Display mode: tools / thoughts (owner only, DM only) |
-| `/botlang` | Bot UI language: en / ru (auto-detected on first start) |
-| `/lang` | Voice language: ru / en / auto |
-| `/cd <path>` | Working directory |
+| `/display` | Display mode: tools / thoughts |
 | `/plan` | Toggle Plan / Build mode |
-| `/git` | Git panel (status, diff, log, stage, commit, push, pull) |
-| `/undo` | Rollback last commit (soft/hard) |
-| `/diff` | Git diff with pagination |
-| `/recent` | Recently edited files with one-tap download |
-| `/screenshot <url>` | Screenshot via Puppeteer |
-| `/allow <id>` | Allow user in groups (owner only) |
-| `/revoke <id>` | Remove user from allowed list (owner only) |
-| `/allowed` | List allowed users |
+| `/cd <path>` | Working directory (`-` or `reset` to clear) |
+| `/botlang` | Bot UI language: en / ru |
+| `/lang` | Voice language: ru / en / auto |
 
 ### Quick Commands (no Claude, instant)
 
 | Command | Description |
 |---------|-------------|
-| `/sh <cmd>` | Shell command |
+| `/sh <cmd>` | Shell command without Claude |
 | `/sys` | CPU, RAM, disk, battery, Wi-Fi, IP, uptime |
-| `/clip` | Get/set clipboard |
-| `/dl <path>` | Download file to Telegram |
-| `/cron <Xh/Xm> <text>` | Set reminder |
+| `/clip` | Get clipboard contents |
+| `/clip <text>` | Set clipboard |
+| `/dl <path>` | Download file from Mac to Telegram |
+| `/cron <Xh/Xm> <text>` | Set a reminder |
+| `/screenshot <url>` | Screenshot via Puppeteer |
+
+### Git Commands
+
+| Command | Description |
+|---------|-------------|
+| `/git` | Git panel with inline buttons |
+| `/git <args>` | Direct git command: `/git log --oneline -5` |
+| `/undo` | Rollback last commit (soft/hard, with confirmation) |
+| `/diff [ref]` | Paginated git diff |
+| `/recent` | Recently edited files with one-tap download |
 
 ### Mac Remote Control
 
 | Command | Description |
 |---------|-------------|
-| `/sleep` | Sleep |
+| `/sleep` | Put Mac to sleep |
 | `/lock` | Lock screen |
-| `/shutdown` | Shut down (confirmation) |
-| `/reboot` | Restart (confirmation) |
+| `/shutdown` | Shut down (with confirmation) |
+| `/reboot` | Restart (with confirmation) |
 
-### MCP: Claude → Telegram
+### Group User Management (owner only)
 
-Claude can proactively message you using built-in MCP tools:
-- `send_telegram(text)` — send text message
-- `send_file_telegram(file_path, caption?)` — send file
+| Command | Description |
+|---------|-------------|
+| `/allow <user_id>` | Allow a user to send requests in groups |
+| `/revoke <user_id>` | Remove a user from the allow list |
+| `/allowed` | List all allowed users |
 
-### Git Panel (`/git`)
+---
 
-Inline buttons: Status, Diff, Log, Stage all, Commit (AI message), Push (with confirmation), Pull, Refresh.
+## Display Modes
 
-### Output Modes
+### Tools Mode (default)
+
+Shows which files and commands Claude is using:
+
+```
+🔧 Read: /Users/you/project/src/api.ts
+🔧 Bash: npm run test -- --watch=false
+🔧 Edit: /Users/you/project/src/api.ts
+📝 Writing response...
+```
+
+Best when you want to see exactly what Claude is doing on your filesystem.
+
+### Thoughts Mode
+
+Streams Claude's text output as it arrives, before the final answer. Useful when:
+- You want to follow Claude's reasoning in real time
+- The task produces no file/tool activity worth showing
+- You're in a group chat (groups always use thoughts mode)
+
+Switch: `/display` → inline buttons, or `/display tools` / `/display thoughts`.
+
+---
+
+## Output Modes
+
+Controls where responses and approvals go:
 
 | Mode | Responses | Approvals | Use case |
 |------|-----------|-----------|----------|
@@ -124,48 +173,128 @@ Inline buttons: Status, Diff, Log, Stage all, Commit (AI message), Push (with co
 | `hybrid` | Terminal | Telegram | Away, approvals on phone |
 | `telegram` | Telegram | Telegram | Fully remote |
 
-Switch: `/mode` in Telegram or `node mode.mjs <mode>` in terminal.
+Switch: `/mode` in Telegram, or `node mode.mjs <mode>` in terminal.
 
-### Group Chat Support
+---
 
-Add the bot to any Telegram group. Members can message Claude by mentioning `@botname` or replying to the bot.
+## Group Chat Setup
 
-- Only the owner can use commands (`/status`, `/display`, etc.)
-- Other members: control access via `/allow <user_id>` and `/revoke <user_id>`
-- Groups always use `thoughts` display mode
-- Dangerous operations from non-owner members are **auto-denied** — owner gets a DM notification
+The bot works in Telegram groups with explicit user authorization.
 
-### Approval System
+### Adding the bot to a group
 
-Dangerous operations (git push, rm -rf, DB migrations, deploys, sensitive file edits) require approval via Telegram inline buttons when in hybrid/telegram mode.
+1. Add the bot to your group
+2. The bot only responds when **mentioned** (`@botname`) or when someone **replies to the bot's message**
+3. Only the **owner** and **allowed users** can trigger Claude
 
-Group requests from non-owner users that hit dangerous ops are automatically denied with an owner DM notification — no approval prompt needed.
+### Authorizing group members
 
-### Auto-Sleep
+From your DM with the bot (owner only):
 
-After 30 min of inactivity, asks via Telegram whether to put Mac to sleep. No response for 10 min → sleeps automatically.
+```
+/allow 123456789      # Allow a user by their Telegram ID
+/revoke 123456789     # Remove access
+/allowed              # List all allowed users
+```
 
-### i18n
+To find a user's ID: ask them to send you their ID via a bot like [@userinfobot](https://t.me/userinfobot).
 
-Bot UI supports **English** and **Russian**. Language is auto-detected from your Telegram profile on first `/start`. Switch anytime with `/botlang`.
+### Group behavior
 
-### First-time Setup
+- Groups always use **thoughts** display mode (tool details are suppressed)
+- **Dangerous operations** (git push, rm -rf, DB migrations, etc.) from group users are **automatically blocked** and the owner receives a DM notification
+- The owner can still approve dangerous ops normally via the approval flow
 
-On first `/start`, a setup wizard asks:
-1. **OS** — macOS / Linux (enables mac-only commands)
+---
+
+## Approval Flow
+
+Dangerous operations require approval when in `hybrid` or `telegram` output mode.
+
+**What triggers approval:**
+- `git push`, `git reset`, `git rebase`, `git merge`, `git checkout --`
+- `git clean`, `git branch -D`
+- `rm -rf`, `rm -r`
+- `docker rm`, `docker stop`, `docker system prune`
+- Prisma migrations and DB pushes
+- `vercel --prod`, `npm publish`
+- Edits to `.env`, `Dockerfile`, `docker-compose`, `.github/`, `prisma/migrations`, `package.json`, config files
+
+**Flow in hybrid/telegram mode:**
+
+1. Claude tries to run the dangerous operation
+2. Bot sends an inline keyboard to Telegram: `✅ Yes` / `❌ No`
+3. You tap — decision is immediately returned to Claude
+4. If no response within 5 min: operation is denied automatically
+
+**Group user attempting a dangerous op:**
+
+- Operation is blocked immediately (no approval prompt)
+- Owner receives a DM: `⚠️ Dangerous op blocked — User <id> tried to run...`
+
+---
+
+## Setup Wizard
+
+Run `/setup` at any time. Steps:
+
+1. **OS** — macOS or Linux (enables Mac-specific commands)
 2. **Output mode** — terminal / hybrid / telegram
-3. **Display mode** — tools (shows tool calls) / thoughts (streams reasoning)
-4. **Token rotation limit** — when to compress context (50k / 100k / 200k / unlimited)
+3. **Display mode** — tools / thoughts
+4. **Token rotation limit** — 50k / 100k / 200k / 300k / unlimited
 
-Re-run anytime with `/setup`.
+On first `/start`, the wizard runs automatically.
 
-### Activity Indicators
+---
 
-When Claude works in terminal mode, the Telegram bot shows a typing indicator and a one-time "⚙️ Working..." notification so you always know something is happening — even if you're away from the keyboard.
+## Architecture
 
-### Token Optimization
+```
+worker/
+  index.mjs           Bot core: polling, commands, streaming, task queue
+  executor.mjs         Spawns Claude Code CLI, parses stream-json events
+  sessions.mjs         State: active session, model, cwd, display mode, token tracking
+  locale.mjs           i18n strings (en + ru)
+  voice.mjs            Groq STT with local Whisper fallback
+  mcp-telegram.mjs     MCP server: send_telegram + send_file_telegram
 
-`--strict-mcp-config` + `--disable-slash-commands` saves ~15K tokens per request vs default Claude Code.
+approval-hook.mjs      PreToolUse hook → Telegram approval buttons + group blocking
+notify-hook.mjs        Stop hook → Telegram completion notification
+mode.mjs               CLI: switch output mode (terminal/hybrid/telegram)
+bot-system-prompt.md   System prompt appended to Claude Code
+config.json            Credentials (gitignored)
+```
+
+### Request flow
+
+```
+Telegram message
+  → handleMessage (auth check, requestMeta built)
+  → enqueue(chatId, prompt, meta)
+  → sendToClaude(chatId, prompt, meta)
+      → writes /tmp/claude-request-meta.json (for approval-hook)
+      → determines displayMode (group → thoughts, DM → from state)
+      → runClaude(prompt, onEvent)
+          → Claude Code CLI subprocess
+          → approval-hook.mjs (PreToolUse) reads meta, blocks group danger ops
+      → streams progress (tools or thoughts mode)
+      → sends final response
+```
+
+### State
+
+All persistent state in `worker/state.json`:
+- `activeSessionId`, `activeProjectDir`, `activeCwd`
+- `model` (sonnet/opus/haiku)
+- `displayMode` (tools/thoughts)
+- `allowedUsers` (array of Telegram user IDs)
+- `tokens`, `scopeTokens`
+- `tokenRotationLimit`
+- `os` (mac/linux)
+- `lang` (en/ru)
+- `setupDone`
+
+---
 
 ## Setup
 
@@ -223,7 +352,8 @@ For approval/notification forwarding to Telegram, add to `~/.claude/settings.jso
       "hooks": [{ "type": "command", "command": "node /full/path/to/tg-claude/approval-hook.mjs", "timeout": 310 }]
     }],
     "Stop": [{
-      "hooks": [{ "type": "command", "command": "node /full/path/to/tg-claude/stop-hook.mjs", "timeout": 10 }]
+      "matcher": "",
+      "hooks": [{ "type": "command", "command": "node /full/path/to/tg-claude/notify-hook.mjs" }]
     }]
   }
 }
@@ -241,26 +371,35 @@ Create `~/Library/LaunchAgents/com.tg-claude.worker.plist` pointing to `node ind
 
 Logs: `/tmp/tg-claude.log`
 
-## Architecture
+---
 
-```
-worker/
-  index.mjs           Bot core: polling, commands, streaming, task queue
-  executor.mjs         Spawns Claude Code CLI, parses stream-json events
-  sessions.mjs         State: active session, model, cwd, token tracking
-  voice.mjs            Groq STT with local Whisper fallback
-  mcp-telegram.mjs     MCP server: send_telegram + send_file_telegram
+## MCP: Claude → Telegram
 
-approval-hook.mjs      PreToolUse hook → Telegram approval buttons (group-aware)
-stop-hook.mjs          Stop hook → Telegram completion notification (terminal only)
-mode.mjs               CLI: switch output mode (terminal/hybrid/telegram)
-bot-system-prompt.md   System prompt appended to Claude Code
-config.json            Credentials (gitignored)
-```
+Claude can proactively message you using built-in MCP tools:
+- `send_telegram(text)` — send text message
+- `send_file_telegram(file_path, caption?)` — send file
+
+---
 
 ## Security
 
-- **Owner-first** — DM restricted to `chatId`; groups require `/allow` for each user
+- **Owner-only DMs** — only your `chatId` can use the bot in direct messages
+- **Group allow-list** — explicit opt-in per user via `/allow`
+- **Dangerous op blocking** — group users cannot trigger dangerous operations; owner is notified
 - **No credentials in repo** — `config.json` is gitignored
 - **Duplicate protection** — kills previous instances on startup
 - **Stale session recovery** — auto-retries without `--resume` on failure
+
+---
+
+## Auto-Sleep
+
+After 30 min of inactivity, asks via Telegram whether to put Mac to sleep. No response for 10 min → sleeps automatically. `/sleep` command also available directly.
+
+## Token Optimization
+
+`--strict-mcp-config` + `--disable-slash-commands` saves ~15K tokens per request vs default Claude Code.
+
+## i18n
+
+Bot UI supports **English** and **Russian**. Language auto-detected from your Telegram profile on first `/start`. Switch anytime with `/botlang`.
