@@ -1145,21 +1145,26 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     }
   };
 
+  const sessionIdBeforeRun = getActiveSession().activeSessionId;
   const result = await runClaude(prompt, onEvent);
   clearInterval(statusInterval);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-  // Auto-save session for continuity
+  // Auto-save session for continuity — but only if user didn't manually switch session while Claude was running
   if (result.sessionId) {
-    const projDir = result.projectDir || getActiveSession().activeProjectDir || "";
-    const savedCwd = result.cwd || getActiveSession().activeCwd;
-    setActiveSession(result.sessionId, projDir, savedCwd);
-    if (pendingSessionName) {
-      renameSession(result.sessionId, pendingSessionName);
-      console.log(`📎 Session: ${result.sessionId.slice(0, 8)}… "${pendingSessionName}" cwd=${savedCwd}`);
-      pendingSessionName = null;
-    } else {
-      console.log(`📎 Session: ${result.sessionId.slice(0, 8)}… cwd=${savedCwd}`);
+    const currentSession = getActiveSession().activeSessionId;
+    const sessionChangedByUser = currentSession !== sessionIdBeforeRun && currentSession !== result.sessionId;
+    if (!sessionChangedByUser) {
+      const projDir = result.projectDir || getActiveSession().activeProjectDir || "";
+      const savedCwd = result.cwd || getActiveSession().activeCwd;
+      setActiveSession(result.sessionId, projDir, savedCwd);
+      if (pendingSessionName) {
+        renameSession(result.sessionId, pendingSessionName);
+        console.log(`📎 Session: ${result.sessionId.slice(0, 8)}… "${pendingSessionName}" cwd=${savedCwd}`);
+        pendingSessionName = null;
+      } else {
+        console.log(`📎 Session: ${result.sessionId.slice(0, 8)}… cwd=${savedCwd}`);
+      }
     }
   }
 
