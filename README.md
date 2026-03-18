@@ -153,8 +153,10 @@ Switch: `/mode` in Telegram or `node mode.mjs <mode>` in terminal.
 Add the bot to any Telegram group. In groups:
 - Only the **owner** + users on the **allowed list** can interact with the bot
 - Bot only responds when **@mentioned** or when **replying** to its messages
+- **Only 3 commands work** in groups: `/allow`, `/allowed`, `/revoke` (owner only). All other slash commands are ignored
 - **Dangerous operations** (git push, rm -rf, DB migrations, etc.) are automatically denied if initiated by a non-owner — the owner gets a DM notification
 - Display is always `thoughts` mode (group-friendly)
+- **Context handoff**: when the token limit is reached, Claude automatically writes `.claude-context.md` into the current project directory (goal, progress, decisions, next steps), then starts a fresh session that reads the file — nothing is lost
 
 ## Approval System
 
@@ -222,17 +224,19 @@ Edit `config.json`:
   "chatId": "YOUR_TELEGRAM_CHAT_ID",
   "groqApiKey": "YOUR_GROQ_API_KEY",
   "timeoutMs": 300000,
-  "claudeTimeoutMs": 1800000
+  "claudeTimeoutMs": 1800000,
+  "tokenRotationLimit": 100000
 }
 ```
 
 | Field | Description | Default |
 |-------|-------------|---------|
 | `botToken` | Telegram bot token from @BotFather | required |
-| `chatId` | Your Telegram user ID | required |
+| `chatId` | Your Telegram user ID (owner) | required |
 | `groqApiKey` | Groq API key for voice STT | required |
 | `timeoutMs` | Approval request timeout (ms) | 300000 (5 min) |
 | `claudeTimeoutMs` | Max time for Claude to run a task (ms) | 1800000 (30 min) |
+| `tokenRotationLimit` | Token threshold for context rotation (0 = unlimited). Configurable via `/setup` | 100000 |
 
 Get `chatId`: send any message to your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` — look for `chat.id`.
 
