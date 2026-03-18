@@ -170,10 +170,13 @@ After 30 min of **both** system idle (no keyboard/mouse) **and** no Telegram mes
 
 ## Notifications
 
-When you're away from the desk and Claude is working in terminal mode, the bot sends:
-- A one-time "⚙️ Working..." message when Claude starts using tools
-- Typing indicator while work is in progress
-- A "✅ Done" notification with Claude's last response when it finishes
+**Telegram sessions** (you write to the bot):
+- Typing indicator and live tool/thoughts updates while Claude works
+- Final response with token stats when done
+- If Claude finishes with no text (tool-only work) — `✅ Готово` notification sent automatically
+
+**Terminal sessions** (you type in the terminal directly):
+- `✅ Done` notification with Claude's last response sent to your DM when the session ends (via Stop hook)
 
 ## i18n
 

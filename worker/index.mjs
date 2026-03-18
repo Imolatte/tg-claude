@@ -1183,12 +1183,18 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   console.log(`${result.success ? "✅" : "❌"} done in ${elapsed}s exit=${result.exitCode} output=${result.output?.slice(0,200)}`);
 
   if (result.success && result.output === "(empty response)") {
+    const hadActivity = toolLines.length > 0 || thoughtsBuffer.length > 0;
     if (streamMsgId) {
       if (displayMode === "tools" && toolLines.length > 0) {
         tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: toolLines.join("\n") }).catch(() => {});
+      } else if (displayMode === "thoughts" && thoughtsBuffer) {
+        tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: `💭 ${thoughtsBuffer}` }).catch(() => {});
       } else {
         await tg("deleteMessage", { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
       }
+    }
+    if (hadActivity) {
+      await tg("sendMessage", { chat_id: chatId, text: `✅ Готово${tokenInfo}`, parse_mode: "Markdown", disable_notification: true });
     }
     return;
   }
