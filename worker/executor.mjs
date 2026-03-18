@@ -34,18 +34,20 @@ try {
   writeFileSync(MCP_CONFIG_FILE, JSON.stringify(mcpConfig, null, 2));
 } catch {}
 
-let activeChild = null;
-export function killActiveChild() {
-  if (activeChild) {
-    try { process.kill(-activeChild.pid, "SIGKILL"); } catch {}
-    try { activeChild.kill("SIGKILL"); } catch {}
-    activeChild = null;
+const activeChildren = new Map(); // chatId → child process
+
+export function killActiveChild(chatId = "default") {
+  const child = activeChildren.get(chatId);
+  if (child) {
+    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+    try { child.kill("SIGKILL"); } catch {}
+    activeChildren.delete(chatId);
     return true;
   }
   return false;
 }
 
-function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd } = {}) {
+function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd, chatId = "default" } = {}) {
   return new Promise((resolve) => {
     const model = getModel();
 
@@ -74,7 +76,7 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd } = {}) {
       env: { ...process.env, CLAUDE_SOURCE: "telegram", CLAUDECODE: "" },
     });
 
-    activeChild = child;
+    activeChildren.set(chatId, child);
 
     let resultText = "";
     let sessionId = null;
@@ -124,12 +126,12 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd } = {}) {
     child.stderr.on("data", (d) => { stderr += d; });
 
     child.on("error", (err) => {
-      activeChild = null;
+      activeChildren.delete(chatId);
       resolve({ success: false, output: err.message, exitCode: -1 });
     });
 
     child.on("close", (code) => {
-      activeChild = null;
+      activeChildren.delete(chatId);
 
       if (buffer.trim()) {
         try {
@@ -155,7 +157,7 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd } = {}) {
     });
 
     setTimeout(() => {
-      activeChild = null;
+      activeChildren.delete(chatId);
       try { child.kill(); } catch {}
       resolve({ success: false, output: "Timeout", exitCode: -1 });
     }, CLAUDE_TIMEOUT);
@@ -180,14 +182,14 @@ export async function runClaude(prompt, onEvent, chatId = "default") {
   const cwd = getCustomCwd() || activeCwd || DEFAULT_CWD;
 
   console.log(`🚀 runClaude chat=${chatId} session=${activeSessionId?.slice(0,8) || "none"} cwd=${cwd} prompt=${prompt.slice(0,60)}`);
-  const result = await spawnClaude(prompt, onEvent, { sessionId: activeSessionId, cwd });
+  const result = await spawnClaude(prompt, onEvent, { sessionId: activeSessionId, cwd, chatId });
   console.log(`🏁 runClaude done exit=${result.exitCode} success=${result.success}`);
 
   // If resume failed — retry as new session
   if (!result.success && activeSessionId && result.exitCode === 1) {
     console.log("⚠️ Resume failed, retrying as new session…");
     clearActiveSession(chatId);
-    return spawnClaude(prompt, onEvent, { cwd });
+    return spawnClaude(prompt, onEvent, { cwd, chatId });
   }
 
   return result;

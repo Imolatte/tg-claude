@@ -76,9 +76,6 @@ const chatQueues = new Map(); // chatId → { busy: bool, queue: [{prompt, meta}
 // Pending rotation decisions: waiting for user to confirm new session or compress
 const pendingRotations = new Map(); // chatId → { oldSessionId, oldProjectDir, sessionKey, summary }
 
-// Message aggregation: buffer messages arriving within 1.5s
-const pendingMsgBuffer = new Map(); // chatId → { texts: [], timer }
-
 // Recent files: track last 10 files modified via Write/Edit
 const recentFiles = []; // [{path, tool, ts}]
 function trackRecentFile(path, tool) {
@@ -1143,11 +1140,17 @@ Be thorough — a new Claude session will read this file to continue the work se
       chatId,
     );
 
+    // Verify Claude actually wrote the file before clearing the session
+    if (!existsSync(contextFile)) {
+      await tg("sendMessage", { chat_id: chatId, text: "⚠️ Context file was not created — session kept to avoid data loss." });
+      return;
+    }
+
     clearActiveSession(chatId);
     if (sessionKey) resetScopeTokens(sessionKey);
 
-    // Start new session that immediately reads the context file
-    await enqueue(chatId, `Read \`${contextFile}\` and continue the work from where we left off.`);
+    // Start new session that immediately reads the context file (preserve group meta)
+    await enqueue(chatId, `Read \`${contextFile}\` and continue the work from where we left off.`, { isGroup: true, isOwner: true });
     await tg("sendMessage", { chat_id: chatId, text: t("rotation.handoff_done", { file: contextFile }), parse_mode: "HTML", disable_notification: true });
   } catch (err) {
     console.error("Context handoff error:", err.message);
@@ -1659,7 +1662,7 @@ async function handleMessage(msg) {
   }
 
   if (text === "/stop") {
-    if (killActiveChild()) {
+    if (killActiveChild(chatId)) {
       getChatQueue(chatId).busy = false;
       await tg("sendMessage", { chat_id: chatId, text: t("cmd.stopped") });
     } else {
