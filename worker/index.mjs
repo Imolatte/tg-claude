@@ -1278,8 +1278,12 @@ async function handleMessage(msg) {
 
   if (isGroupChat(msg)) {
     // In groups: only authorized users, only when mentioned or replying to bot
+    // Exception: owner management commands work without mention
     if (!isAuthorized(msg)) return;
-    if (!isBotMentioned(msg)) return;
+    const rawText = (msg.text || "").trim();
+    const isOwnerCmd = String(msg.from?.id) === OWNER_CHAT_ID &&
+      (rawText.startsWith("/allow") || rawText.startsWith("/revoke") || rawText === "/allowed");
+    if (!isOwnerCmd && !isBotMentioned(msg)) return;
   } else {
     // In DM: owner only
     if (chatId !== OWNER_CHAT_ID) return;
