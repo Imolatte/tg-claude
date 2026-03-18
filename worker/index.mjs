@@ -1281,6 +1281,9 @@ async function handleMessage(msg) {
     initiatorUserId: String(msg.from?.id || ""),
   };
 
+  // Track Telegram activity for auto-sleep (owner messages only)
+  if (String(msg.from?.id) === OWNER_CHAT_ID) lastTelegramActivityAt = Date.now();
+
   console.log(`📩 text=${(msg.text||msg.caption||"").slice(0,50)} fwd=${!!(msg.forward_origin||msg.forward_from)} hasDoc=${!!msg.document} hasPhoto=${!!msg.photo}`);
 
   // Forwarded message — combine with pending text if available
@@ -2076,9 +2079,9 @@ function cleanupPid() {
 }
 
 let sleepPromptSentAt = null; // when we sent the sleep question
+let lastTelegramActivityAt = null; // timestamp of last owner message via Telegram
 
-const SLEEP_IDLE_MS = 30 * 60 * 1000;    // 30 min idle → ask
-const SLEEP_CONFIRM_MS = 10 * 60 * 1000; // 10 min no answer → sleep
+const SLEEP_IDLE_MS = 30 * 60 * 1000; // 30 min idle since last Telegram activity → ask
 
 function doSleep() {
   try { execSync("pmset sleepnow"); } catch {}
@@ -2111,23 +2114,20 @@ function startAutoSleepWatcher() {
       return;
     }
 
-    // If we already sent the prompt, check if 10 min passed without response
+    // If we already sent the prompt — cancel if user touched keyboard/mouse
     if (sleepPromptSentAt !== null) {
-      // If user touched keyboard/mouse since we asked — cancel silently
       const idle = getSystemIdleMs();
       if (idle >= 0 && idle < SLEEP_IDLE_MS) {
         sleepPromptSentAt = null;
-        return;
-      }
-      if (now - sleepPromptSentAt >= SLEEP_CONFIRM_MS) {
-        sleepPromptSentAt = null;
-        tg("sendMessage", { chat_id: OWNER_CHAT_ID, text: t("sleep.no_response") })
-          .finally(doSleep);
       }
       return;
     }
 
-    // Check real system idle — keyboard, mouse, trackpad
+    // Only ask if last activity was via Telegram (not working directly at Mac)
+    if (!lastTelegramActivityAt) return;
+    if (now - lastTelegramActivityAt < SLEEP_IDLE_MS) return;
+
+    // Also check real system idle — keyboard, mouse, trackpad
     const idleMs = getSystemIdleMs();
     if (idleMs < 0 || idleMs < SLEEP_IDLE_MS) return;
 
