@@ -61,6 +61,9 @@ const pendingDMText = {}; // chatId → { prompt, timer } — buffer text to com
 // Per-chat queues: each chat has independent busy flag + queue
 const chatQueues = new Map(); // chatId → { busy: bool, queue: [{prompt, meta}] }
 
+// Pending rotation decisions: waiting for user to confirm new session or compress
+const pendingRotations = new Map(); // chatId → { oldSessionId, oldProjectDir, sessionKey, summary }
+
 // Message aggregation: buffer messages arriving within 1.5s
 const pendingMsgBuffer = new Map(); // chatId → { texts: [], timer }
 
@@ -1028,6 +1031,100 @@ async function handleCallback(cb) {
     await sendDiffPage(chatId);
     return;
   }
+
+  // Token rotation decision
+  if (data.startsWith("rotation:")) {
+    const op = data.split(":")[1];
+
+    if (op === "new") {
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "⏳" });
+      await tg("editMessageText", { chat_id: chatId, message_id: cb.message.message_id, text: t("rotation.summarizing") });
+      const pending = pendingRotations.get(chatId);
+      try {
+        const summaryResult = await runClaude(t("rotation.summarize"), () => {}, chatId);
+        const summary = summaryResult.output || t("cmd.no_data");
+        const oldSessionId = pending?.oldSessionId;
+        const oldProjectDir = pending?.oldProjectDir;
+        const sessionKey = pending?.sessionKey;
+        clearActiveSession(chatId);
+        if (sessionKey) resetScopeTokens(sessionKey);
+        pendingRotations.delete(chatId);
+        // Start new session with context
+        await enqueue(chatId, t("rotation.continue", { summary }));
+        // Ask about deleting old session
+        if (oldSessionId && oldProjectDir) {
+          await tg("sendMessage", {
+            chat_id: chatId,
+            text: t("rotation.ask_delete"),
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [[
+                { text: t("rotation.btn_delete"), callback_data: `rotation:delete:${oldSessionId}:${oldProjectDir}` },
+                { text: t("rotation.btn_keep"), callback_data: "rotation:keep" },
+              ]],
+            },
+          });
+        }
+      } catch (err) {
+        console.error("Session rotation error:", err.message);
+        clearActiveSession(chatId);
+        if (pending?.sessionKey) resetScopeTokens(pending.sessionKey);
+        pendingRotations.delete(chatId);
+        await tg("editMessageText", { chat_id: chatId, message_id: cb.message.message_id, text: t("error.generic", { msg: err.message }) });
+      }
+      return;
+    }
+
+    if (op === "compress") {
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "⏳" });
+      await tg("editMessageText", { chat_id: chatId, message_id: cb.message.message_id, text: t("rotation.compressing") });
+      const pending = pendingRotations.get(chatId);
+      await doCompressSession(chatId, pending?.sessionKey, cb.message.message_id);
+      pendingRotations.delete(chatId);
+      return;
+    }
+
+    if (op === "delete") {
+      const parts = data.split(":");
+      const sesId = parts[2];
+      const projDir = parts.slice(3).join(":");
+      deleteSession(sesId, projDir);
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.deleted") });
+      await tg("editMessageText", { chat_id: chatId, message_id: cb.message.message_id, text: t("rotation.deleted_old") });
+      return;
+    }
+
+    if (op === "keep") {
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "✅" });
+      await tg("editMessageText", { chat_id: chatId, message_id: cb.message.message_id, text: t("rotation.kept_old") });
+      return;
+    }
+
+    return;
+  }
+}
+
+// ── Compress session (compact context, keep working) ────────────────
+
+async function doCompressSession(chatId, sessionKey, editMsgId = null) {
+  try {
+    const summaryResult = await runClaude(t("rotation.summarize"), () => {}, chatId);
+    const summary = summaryResult.output || t("cmd.no_data");
+    clearActiveSession(chatId);
+    if (sessionKey) resetScopeTokens(sessionKey);
+    // Start new session seamlessly with context
+    await enqueue(chatId, t("rotation.continue", { summary }));
+    if (editMsgId) {
+      await tg("editMessageText", { chat_id: chatId, message_id: editMsgId, text: t("rotation.compressed") }).catch(() => {});
+    } else {
+      await tg("sendMessage", { chat_id: chatId, text: t("rotation.compressed"), disable_notification: true });
+    }
+  } catch (err) {
+    console.error("Compress session error:", err.message);
+    if (editMsgId) {
+      await tg("editMessageText", { chat_id: chatId, message_id: editMsgId, text: t("error.generic", { msg: err.message }) }).catch(() => {});
+    }
+  }
 }
 
 // ── Send prompt to Claude ───────────────────────────────────────────
@@ -1231,24 +1328,22 @@ async function sendToClaude(chatId, prompt, meta = {}) {
 
   await sendMsg(chatId, result.output + tokenInfo);
 
-  // Auto-rotate session when token limit reached
+  // Ask user what to do when token limit reached
   if (shouldRotate) {
-    console.log("🔄 Token limit reached, rotating session...");
-    tg("sendMessage", { chat_id: chatId, text: t("rotation.limit", { limit: formatK(getTokenRotationLimit()) }), disable_notification: true }).catch(() => {});
-    try {
-      const summaryResult = await runClaude(
-        t("rotation.summarize"),
-        () => {}
-      );
-      const summary = summaryResult.output || t("cmd.no_data");
-      clearActiveSession(chatId);
-      resetScopeTokens(sessionKey);
-      await enqueue(chatId, t("rotation.continue", { summary }));
-    } catch (err) {
-      console.error("Session rotation error:", err.message);
-      clearActiveSession(chatId);
-      resetScopeTokens(sessionKey);
-    }
+    console.log("🔄 Token limit reached, asking user...");
+    const { activeSessionId, activeProjectDir } = getActiveSession(chatId);
+    pendingRotations.set(chatId, { oldSessionId: activeSessionId, oldProjectDir: activeProjectDir, sessionKey });
+    await tg("sendMessage", {
+      chat_id: chatId,
+      text: t("rotation.ask", { limit: formatK(getTokenRotationLimit()) }),
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: t("rotation.btn_new"), callback_data: "rotation:new" },
+          { text: t("rotation.btn_compress"), callback_data: "rotation:compress" },
+        ]],
+      },
+    });
   }
 }
 
@@ -1755,6 +1850,22 @@ async function handleMessage(msg) {
     }
     return;
   }
+  if (text === "/compact") {
+    const { activeSessionId } = getActiveSession(chatId);
+    if (!activeSessionId) {
+      await tg("sendMessage", { chat_id: chatId, text: t("sessions.no_active") });
+      return;
+    }
+    const msg = await tg("sendMessage", { chat_id: chatId, text: t("rotation.compressing"), disable_notification: true });
+    const { sessionKey } = (() => {
+      // retrieve current sessionKey from state
+      const s = getActiveSession(chatId);
+      return { sessionKey: s.activeSessionId };
+    })();
+    await doCompressSession(chatId, sessionKey, msg.result?.message_id);
+    return;
+  }
+
   if (text === "/plan") {
     planMode = !planMode;
     const emoji = planMode ? "📐" : "🔨";
