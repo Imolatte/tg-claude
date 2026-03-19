@@ -35,7 +35,7 @@ import {
   getTokenRotationLimit, setTokenRotationLimit, isSetupDone, markSetupDone,
   getOs, setOs,
   getAllowedUsers, addAllowedUser, removeAllowedUser,
-  getShowDiff, setShowDiff,
+
 } from "./sessions.mjs";
 import { t, getLang, setLang, loadLang, availableLangs } from "./locale.mjs";
 
@@ -266,7 +266,8 @@ function buildSessionList(chatId = "default") {
   const buttons = [];
 
   for (const s of sessions) {
-    const marker = s.isActive ? "▶️ " : "  ";
+    const isActive = s.sessionId === activeSessionId;
+    const marker = isActive ? "▶️ " : "  ";
     const ago = formatAgo(s.modifiedAt);
     const name = s.displayName || s.lastMessage.slice(0, 40);
     const proj = s.projectName.split("/").pop();
@@ -275,7 +276,7 @@ function buildSessionList(chatId = "default") {
     const shortId = s.sessionId.slice(0, 8);
     const btnLabel = s.displayName || s.lastMessage.slice(0, 25);
     buttons.push([
-      { text: `${s.isActive ? "▶️ " : ""}${btnLabel}`, callback_data: `ses:${shortId}` },
+      { text: `${isActive ? "▶️ " : ""}${btnLabel}`, callback_data: `ses:${shortId}` },
       { text: "🗑", callback_data: `del:${shortId}` },
     ]);
   }
@@ -349,21 +350,6 @@ async function sendSetupStep1(chatId) {
   });
 }
 
-async function sendSetupStep2(chatId) {
-  await tg("sendMessage", {
-    chat_id: chatId,
-    text: t("setup.diff_prompt"),
-    parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: t("setup.diff_on"), callback_data: "setup:diff:on" },
-          { text: t("setup.diff_off"), callback_data: "setup:diff:off" },
-        ],
-      ],
-    },
-  });
-}
 
 async function sendSetupStep3(chatId) {
   await tg("sendMessage", {
@@ -663,19 +649,6 @@ async function handleCallback(cb) {
         chat_id: chatId,
         message_id: cb.message.message_id,
         text: t("cmd.mode_set", { mode: esc(label) }),
-        parse_mode: "HTML",
-      });
-      await sendSetupStep2(chatId);
-      return;
-    }
-    if (step === "diff") {
-      const enabled = value === "on";
-      setShowDiff(enabled);
-      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: enabled ? "✅ Дифф включён" : "❌ Дифф выключен" });
-      await tg("editMessageText", {
-        chat_id: chatId,
-        message_id: cb.message.message_id,
-        text: enabled ? "✅ Мини-дифф <b>включён</b>" : "❌ Мини-дифф <b>выключен</b>",
         parse_mode: "HTML",
       });
       await sendSetupStep3(chatId);
@@ -1234,29 +1207,17 @@ async function sendToClaude(chatId, prompt, meta = {}) {
           }
 
           let detail = "";
-          let diffLines = [];
           if (block.name === "Read") detail = input.file_path || "";
           else if (block.name === "Bash") detail = (input.command || "").slice(0, 60);
           else if (block.name === "Grep") detail = input.pattern || "";
           else if (block.name === "Edit" || block.name === "Write") {
             detail = input.file_path || "";
             if (detail) trackRecentFile(detail, block.name);
-            if (getShowDiff()) {
-              if (block.name === "Edit" && input.old_string && input.new_string) {
-                const oldLine = input.old_string.split("\n")[0].trim().slice(0, 55);
-                const newLine = input.new_string.split("\n")[0].trim().slice(0, 55);
-                const diffText = [oldLine && `- ${oldLine}`, newLine && `+ ${newLine}`].filter(Boolean).join("\n");
-                if (diffText) diffLines.push(`<pre>${esc(diffText)}</pre>`);
-              } else if (block.name === "Write" && input.content) {
-                const firstLine = input.content.split("\n")[0].trim().slice(0, 60);
-                if (firstLine) diffLines.push(`<pre>${esc(`+ ${firstLine}`)}</pre>`);
-              }
-            }
           }
           else if (block.name === "Agent") detail = input.description || "";
           else detail = Object.values(input).join(" ").slice(0, 40);
 
-          const toolLine = [`🔧 ${esc(block.name)}${detail ? ": " + esc(detail) : ""}`, ...diffLines].join("\n");
+          const toolLine = `🔧 ${esc(block.name)}${detail ? ": " + esc(detail) : ""}`;
           toolLines.push(toolLine);
           if (toolLines.length > 6) toolLines = toolLines.slice(-6);
           console.log(toolLine);
@@ -1670,17 +1631,6 @@ async function handleMessage(msg) {
   }
 
 
-  if (text === "/codediff") {
-    const current = getShowDiff();
-    const next = !current;
-    setShowDiff(next);
-    await tg("sendMessage", {
-      chat_id: chatId,
-      text: next ? "✅ Мини-дифф <b>включён</b>" : "❌ Мини-дифф <b>выключен</b>",
-      parse_mode: "HTML",
-    });
-    return;
-  }
 
   if (text.startsWith("/mode")) {
     const arg = text.slice(5).trim().toLowerCase();
