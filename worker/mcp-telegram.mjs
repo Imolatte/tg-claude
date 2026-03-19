@@ -17,8 +17,16 @@ const CHAT_ID = config.chatId;
 
 // WS bridge removed — using /opt/axon-team/ file-based channel
 
+function getActiveChatId() {
+  try {
+    const meta = JSON.parse(readFileSync("/tmp/claude-request-meta.json", "utf-8"));
+    if (meta.isGroup && meta.groupChatId) return String(meta.groupChatId);
+  } catch {}
+  return CHAT_ID;
+}
+
 async function sendTelegram(text, chatId) {
-  const targetId = String(chatId || CHAT_ID);
+  const targetId = String(chatId || getActiveChatId());
   const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -34,7 +42,7 @@ async function sendFile(filePath, caption, chatId) {
   const fileBuffer = readFileSync(filePath);
   const fileName = basename(filePath);
   const form = new FormData();
-  form.append("chat_id", chatId || CHAT_ID);
+  form.append("chat_id", chatId || getActiveChatId());
   form.append("document", new Blob([fileBuffer]), fileName);
   if (caption) form.append("caption", caption);
 
