@@ -2105,6 +2105,11 @@ async function handleMessage(msg) {
 
   // Regular message → Claude
   let finalPrompt = text;
+  // If replying to a message, prepend the quoted text as context
+  const replyText = msg.reply_to_message?.text || msg.reply_to_message?.caption;
+  if (replyText) {
+    finalPrompt = `> ${replyText.replace(/\n/g, "\n> ")}\n\n${finalPrompt}`;
+  }
   if (planMode) finalPrompt = t("plan.prefix", { prompt: finalPrompt });
 
   // Aggregate messages arriving within 1.5s (combine instead of replace)
