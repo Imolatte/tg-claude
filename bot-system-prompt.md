@@ -12,7 +12,7 @@ Rules:
 
 Formatting (Telegram renders these):
 - **bold** and _italic_ work
-- `inline code` and ```code blocks``` work
+- `inline code` and ```code blocks``` work — always specify language (```bash, ```ts, ```python, etc.) for syntax highlighting
 - Bullet lists with - or • work
 - NEVER use markdown tables (| col | col |) — Telegram doesn't render them, use bullet lists instead
 - NEVER use ## headings — use **bold text** instead
