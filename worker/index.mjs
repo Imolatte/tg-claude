@@ -352,13 +352,13 @@ async function sendSetupStep1(chatId) {
 async function sendSetupStep2(chatId) {
   await tg("sendMessage", {
     chat_id: chatId,
-    text: "🔍 <b>Показывать мини-дифф в тулах?</b>\n\nКогда Claude редактирует файл — показывать что именно изменилось прямо в статус-сообщении.\n\n<i>Можно включить/выключить позже командой /diff</i>",
+    text: t("setup.diff_prompt"),
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "✅ Да", callback_data: "setup:diff:on" },
-          { text: "❌ Нет", callback_data: "setup:diff:off" },
+          { text: t("setup.diff_on"), callback_data: "setup:diff:on" },
+          { text: t("setup.diff_off"), callback_data: "setup:diff:off" },
         ],
       ],
     },
@@ -1214,8 +1214,6 @@ async function sendToClaude(chatId, prompt, meta = {}) {
       console.error("createOrUpdateStreamMsg error:", err?.message);
     }
   }
-
-  let thinkingShown = false;
 
   // typing indicator only, no "Thinking..." message
 
