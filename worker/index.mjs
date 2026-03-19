@@ -1212,25 +1212,26 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   let mcpSent = false;
 
   async function createOrUpdateStreamMsg(rawText) {
-    const text = stripSystemTags(rawText);
-    if (!streamMsgId) {
-      const res = await tg("sendMessage", { chat_id: chatId, text, disable_notification: true });
-      streamMsgId = res?.result?.message_id || null;
-    } else {
-      lastUpdateTime = Date.now();
-      tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text }).catch(() => {});
+    const text = stripSystemTags(String(rawText || ""));
+    if (!text) return;
+    try {
+      if (!streamMsgId) {
+        const res = await tg("sendMessage", { chat_id: chatId, text, disable_notification: true });
+        streamMsgId = res?.result?.message_id || null;
+        lastUpdateTime = Date.now();
+        console.log(`📡 stream msg created id=${streamMsgId}`);
+      } else {
+        lastUpdateTime = Date.now();
+        tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text }).catch(() => {});
+      }
+    } catch (err) {
+      console.error("createOrUpdateStreamMsg error:", err?.message);
     }
   }
 
   let thinkingShown = false;
 
-  // Show "Thinking..." after 1s, then refresh typing indicator every 4s
-  setTimeout(() => {
-    if (!thinkingShown && !isWritingResponse) {
-      thinkingShown = true;
-      createOrUpdateStreamMsg(t("status.thinking"));
-    }
-  }, 1000);
+  // typing indicator only, no "Thinking..." message
 
   const statusInterval = setInterval(() => {
     tg("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
@@ -1239,68 +1240,55 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   const onEvent = (event) => {
     if (event.type === "assistant" && event.message?.content) {
       for (const block of event.message.content) {
-        if (displayMode === "thoughts") {
-          // Thoughts mode: stream text reasoning blocks, ignore tool details
-          if (block.type === "text" && block.text?.trim()) {
-            thinkingShown = true;
-            lastActivityTime = Date.now();
-            thoughtsBuffer += block.text;
-            // Keep last 900 chars to fit Telegram limits
-            if (thoughtsBuffer.length > 900) thoughtsBuffer = "…" + thoughtsBuffer.slice(-880);
-            const now = Date.now();
-            if (now - lastUpdateTime > TOOL_UPDATE_INTERVAL) {
-              createOrUpdateStreamMsg(`💭 ${thoughtsBuffer}`);
-            }
-          }
-          // Track file edits and MCP sends even in thoughts mode
-          if (block.type === "tool_use") {
-            const input = block.input || {};
-            if (block.name === "Edit" || block.name === "Write") {
-              const fp = input.file_path || "";
-              if (fp) trackRecentFile(fp, block.name);
-            }
-            if (block.name === "send_telegram" || block.name === "send_file_telegram") {
-              mcpSent = true;
-            }
-          }
-        } else {
-          // Tools mode (default): show tool activity lines
-          if (block.type === "tool_use") {
-            isWritingResponse = false;
-            lastActivityTime = Date.now();
-            const input = block.input || {};
-            let detail = "";
-            if (block.name === "Read") detail = input.file_path || "";
-            else if (block.name === "Bash") detail = (input.command || "").slice(0, 60);
-            else if (block.name === "Grep") detail = input.pattern || "";
-            else if (block.name === "Edit" || block.name === "Write") {
-              detail = input.file_path || "";
-              if (detail) trackRecentFile(detail, block.name);
-            }
-            else if (block.name === "Agent") detail = input.description || "";
-            else if (block.name === "send_telegram" || block.name === "send_file_telegram") { mcpSent = true; continue; }
-            else detail = Object.values(input).join(" ").slice(0, 40);
+        if (block.type === "tool_use") {
+          lastActivityTime = Date.now();
+          const input = block.input || {};
 
-            const toolLine = `🔧 ${block.name}${detail ? ": " + detail : ""}`;
-            toolLines.push(toolLine);
-            if (toolLines.length > 6) toolLines = toolLines.slice(-6);
-            console.log(toolLine);
+          if (block.name?.includes("send_telegram") || block.name?.includes("send_file_telegram")) {
+            mcpSent = true;
+            continue;
+          }
 
-            const now = Date.now();
-            if (now - lastUpdateTime > TOOL_UPDATE_INTERVAL) {
-              createOrUpdateStreamMsg(toolLines.join("\n"));
-            }
-          } else if (block.type === "text" && block.text && !isWritingResponse) {
-            isWritingResponse = true;
-            lastActivityTime = Date.now();
-            if (toolLines.length > 0) {
-              createOrUpdateStreamMsg(`${toolLines.join("\n")}\n\n${t("status.writing")}`);
-            }
+          let detail = "";
+          if (block.name === "Read") detail = input.file_path || "";
+          else if (block.name === "Bash") detail = (input.command || "").slice(0, 60);
+          else if (block.name === "Grep") detail = input.pattern || "";
+          else if (block.name === "Edit" || block.name === "Write") {
+            detail = input.file_path || "";
+            if (detail) trackRecentFile(detail, block.name);
+          }
+          else if (block.name === "Agent") detail = input.description || "";
+          else detail = Object.values(input).join(" ").slice(0, 40);
+
+          const toolLine = `🔧 ${block.name}${detail ? ": " + detail : ""}`;
+          toolLines.push(toolLine);
+          if (toolLines.length > 6) toolLines = toolLines.slice(-6);
+          console.log(toolLine);
+
+          const now = Date.now();
+          if (now - lastUpdateTime > TOOL_UPDATE_INTERVAL) {
+            buildAndUpdateStreamMsg();
+          }
+        } else if (block.type === "text" && block.text?.trim()) {
+          lastActivityTime = Date.now();
+          thoughtsBuffer += block.text;
+          if (thoughtsBuffer.length > 600) thoughtsBuffer = "…" + thoughtsBuffer.slice(-580);
+
+          const now = Date.now();
+          if (now - lastUpdateTime > TOOL_UPDATE_INTERVAL) {
+            buildAndUpdateStreamMsg();
           }
         }
       }
     }
   };
+
+  function buildAndUpdateStreamMsg() {
+    const parts = [];
+    if (toolLines.length > 0) parts.push(toolLines.join("\n"));
+    if (thoughtsBuffer) parts.push(`💭 ${thoughtsBuffer}`);
+    if (parts.length > 0) createOrUpdateStreamMsg(parts.join("\n\n"));
+  }
 
   const sessionIdBeforeRun = getActiveSession(chatId).activeSessionId;
   const result = await runClaude(prompt, onEvent, chatId);
@@ -1347,13 +1335,8 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   if (result.success && result.output === "(empty response)") {
     const hadActivity = toolLines.length > 0 || thoughtsBuffer.length > 0;
     if (streamMsgId) {
-      if (displayMode === "tools" && toolLines.length > 0) {
-        tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: toolLines.join("\n") }).catch(() => {});
-      } else if (displayMode === "thoughts" && thoughtsBuffer) {
-        tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: `💭 ${thoughtsBuffer}` }).catch(() => {});
-      } else {
-        await tg("deleteMessage", { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
-      }
+      if (streamMsgId) buildAndUpdateStreamMsg();
+      else await tg("deleteMessage", { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
     }
     if (hadActivity) {
       await tg("sendMessage", { chat_id: chatId, text: `✅ Готово${tokenInfo}`, parse_mode: "Markdown", disable_notification: true });
@@ -1361,25 +1344,15 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     return;
   }
 
+  // Finalize stream message with last known state, or delete if nothing to show
   if (streamMsgId) {
-    if (displayMode === "tools" && toolLines.length > 0) {
-      tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: toolLines.join("\n") }).catch(() => {});
-    } else if (displayMode === "thoughts" && thoughtsBuffer) {
-      tg("editMessageText", { chat_id: chatId, message_id: streamMsgId, text: `💭 ${thoughtsBuffer}` }).catch(() => {});
-    } else {
-      await tg("deleteMessage", { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
-    }
+    buildAndUpdateStreamMsg();
   }
 
   if (!result.success) {
-    // If Mac went to sleep intentionally — suppress error, just clean up
     try {
-      if (existsSync("/tmp/claude-intentional-sleep")) {
-        unlinkSync("/tmp/claude-intentional-sleep");
-        return;
-      }
+      if (existsSync("/tmp/claude-intentional-sleep")) { unlinkSync("/tmp/claude-intentional-sleep"); return; }
     } catch {}
-    // Distinct error notification — stands out from normal responses
     await tg("sendMessage", {
       chat_id: chatId,
       text: `❌ <b>Error</b> (exit ${result.exitCode})\n\n<code>${esc(result.output.slice(0, 3000))}</code>`,
@@ -1388,7 +1361,6 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     return;
   }
 
-  // Skip sending result.output if Claude already sent response via MCP send_telegram
   if (!mcpSent) {
     await sendMsg(chatId, result.output + tokenInfo);
   }
@@ -1447,10 +1419,12 @@ async function handleMessage(msg) {
     // Exception: owner management commands work without mention
     if (!isAuthorized(msg)) return;
     const rawText = (msg.text || "").trim();
-    const isOwnerCmd = String(msg.from?.id) === OWNER_CHAT_ID &&
+    const isOwner = String(msg.from?.id) === OWNER_CHAT_ID;
+    const isOwnerCmd = isOwner &&
       (rawText.startsWith("/allow") || rawText.startsWith("/revoke") || rawText === "/allowed");
-    if (!isOwnerCmd && !isBotMentioned(msg)) return;
-    // In groups: block all commands except the three allowed management ones
+    // Owner can write without @mention; others need to @mention the bot
+    if (!isOwner && !isBotMentioned(msg)) return;
+    // In groups: block slash commands for non-owners
     if (rawText.startsWith("/") && !isOwnerCmd) return;
   } else {
     // In DM: owner only
