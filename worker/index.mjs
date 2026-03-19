@@ -1285,7 +1285,7 @@ async function sendToClaude(chatId, prompt, meta = {}) {
 
   function buildAndUpdateStreamMsg() {
     const parts = [];
-    if (toolLines.length > 0) parts.push(toolLines.join("\n"));
+    if (!isGroup && toolLines.length > 0) parts.push(toolLines.join("\n"));
     if (thoughtsBuffer) parts.push(`💭 ${thoughtsBuffer}`);
     if (parts.length > 0) createOrUpdateStreamMsg(parts.join("\n\n"));
   }
