@@ -1,9 +1,29 @@
 {
-  "name": "telegram-relay-worker",
+  "name": "tg-claude",
   "version": "1.0.0",
+  "description": "Turn your Mac/Linux into a remote Claude Code terminal via Telegram",
   "type": "module",
   "scripts": {
     "start": "node index.mjs"
+  },
+  "keywords": [
+    "telegram",
+    "claude",
+    "claude-code",
+    "remote-terminal",
+    "ai",
+    "bot",
+    "mcp",
+    "anthropic"
+  ],
+  "author": "Andrey Petrushikhin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Imolatte/tg-claude.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "puppeteer": "^24.39.1"

@@ -2302,10 +2302,37 @@ function startAutoSleepWatcher() {
   }, INTERVAL_MS);
 }
 
+// ── Pending approval reminder ───────────────────────────────────────
+// If a dangerous op is waiting for approval in the terminal for >3 min,
+// send a reminder to Telegram (the actual approval stays in terminal).
+
+const PENDING_APPROVAL_FILE = "/tmp/claude-tg-pending-approval";
+const APPROVAL_REMINDER_MS = 3 * 60 * 1000; // 3 min
+
+function startApprovalWatcher() {
+  setInterval(() => {
+    try {
+      if (!existsSync(PENDING_APPROVAL_FILE)) return;
+      const data = JSON.parse(readFileSync(PENDING_APPROVAL_FILE, "utf-8"));
+      const age = Date.now() - data.ts;
+      if (age < APPROVAL_REMINDER_MS) return;
+      // Send reminder and delete marker
+      unlinkSync(PENDING_APPROVAL_FILE);
+      const mins = Math.round(age / 60000);
+      tg("sendMessage", {
+        chat_id: OWNER_CHAT_ID,
+        text: t("approval.pending_terminal", { min: mins, tool: esc(data.toolName), detail: esc(data.detail) }),
+        parse_mode: "HTML",
+      }).catch(() => {});
+    } catch {}
+  }, 30_000); // check every 30s
+}
+
 init().then(() => {
   poll();
   startAutoSleepWatcher();
   startBatteryWatcher();
+  startApprovalWatcher();
 });
 
 process.on("SIGINT", () => { running = false; cleanupPid(); process.exit(0); });

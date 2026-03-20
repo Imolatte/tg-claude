@@ -32,10 +32,12 @@ const WORKING_NOTIFIED_FILE = "/tmp/claude-tg-working-notified";
 const REQUEST_META_FILE = "/tmp/claude-request-meta.json";
 
 // Mode: "terminal" | "hybrid" | "telegram"
+// CLAUDE_SOURCE=telegram → bot spawned this, use mode file
+// No CLAUDE_SOURCE → user is in terminal directly, always terminal mode
 function getMode() {
-  if (process.env.CLAUDE_SOURCE === "telegram") return "telegram";
+  if (process.env.CLAUDE_SOURCE !== "telegram") return "terminal";
   try { return readFileSync(MODE_FILE, "utf-8").trim(); }
-  catch { return "terminal"; }
+  catch { return "telegram"; } // bot sessions default to telegram
 }
 
 function useTgApproval() {
@@ -339,7 +341,16 @@ async function main() {
   }
 
   // Terminal mode → no decision, Claude Code's built-in prompt handles it
+  // Write a marker file so the bot can send a TG reminder if unanswered for 3 min
   if (!useTgApproval()) {
+    const detail = getDetail(toolName, toolInput);
+    try {
+      writeFileSync("/tmp/claude-tg-pending-approval", JSON.stringify({
+        toolName,
+        detail: detail.slice(0, 300),
+        ts: Date.now(),
+      }));
+    } catch {}
     process.exit(0);
   }
 

@@ -164,6 +164,7 @@ const locales = {
     "approval.yes_btn": "✅ Yes",
     "approval.no_btn": "❌ No",
     "approval.cancel_btn": "❌ Cancel",
+    "approval.pending_terminal": "⚠️ Approval waiting in terminal for {min} min:\n<b>{tool}</b>\n<code>{detail}</code>",
 
     // ── Notify hook ──
     "hook.task_done": "Task completed",
@@ -370,6 +371,7 @@ const locales = {
     "approval.yes_btn": "✅ Да",
     "approval.no_btn": "❌ Нет",
     "approval.cancel_btn": "❌ Отмена",
+    "approval.pending_terminal": "⚠️ Approval ждёт в терминале уже {min} мин:\n<b>{tool}</b>\n<code>{detail}</code>",
 
     // ── Notify hook ──
     "hook.task_done": "Задача завершена",
