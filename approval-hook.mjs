@@ -32,12 +32,11 @@ const WORKING_NOTIFIED_FILE = "/tmp/claude-tg-working-notified";
 const REQUEST_META_FILE = "/tmp/claude-request-meta.json";
 
 // Mode: "terminal" | "hybrid" | "telegram"
-// CLAUDE_SOURCE=telegram → bot spawned this, use mode file
-// No CLAUDE_SOURCE → user is in terminal directly, always terminal mode
+// CLAUDE_SOURCE=telegram → bot spawned this, always approve via TG
+// No CLAUDE_SOURCE → user is in terminal, always use Claude's built-in prompt
 function getMode() {
-  if (process.env.CLAUDE_SOURCE !== "telegram") return "terminal";
-  try { return readFileSync(MODE_FILE, "utf-8").trim(); }
-  catch { return "telegram"; } // bot sessions default to telegram
+  if (process.env.CLAUDE_SOURCE === "telegram") return "telegram";
+  return "terminal";
 }
 
 function useTgApproval() {
