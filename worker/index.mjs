@@ -67,6 +67,7 @@ function setOutputMode(mode) {
 
 let pendingSessionName = null;
 let planMode = false; // false = build (default), true = plan only
+const pendingGroupNaming = new Map(); // chatId → { prompt, meta } — waiting for session name in group
 const cronJobs = []; // [{label, fireAt, timer}]
 const pendingDMText = {}; // chatId → { prompt, timer } — buffer text to combine with following forward
 const pendingPhotos = {}; // chatId → { paths: [], caption, timer, meta } — buffer photos arriving together
@@ -2126,6 +2127,35 @@ async function handleMessage(msg) {
     finalPrompt = `> ${replyText.replace(/\n/g, "\n> ")}\n\n${finalPrompt}`;
   }
   if (planMode) finalPrompt = t("plan.prefix", { prompt: finalPrompt });
+
+  // Group: if waiting for session name, use this message as the name
+  if (pendingGroupNaming.has(chatId)) {
+    const pending = pendingGroupNaming.get(chatId);
+    pendingGroupNaming.delete(chatId);
+    pendingSessionName = finalPrompt.trim();
+    await tg("sendMessage", {
+      chat_id: chatId,
+      text: t("sessions.group_named", { name: esc(pendingSessionName) }),
+      parse_mode: "HTML",
+    });
+    // Now enqueue the original prompt that triggered the naming
+    await enqueue(chatId, pending.prompt, pending.meta);
+    return;
+  }
+
+  // Group: first message with no active session → ask for session name
+  if (isGroupChat(msg)) {
+    const { activeSessionId } = getActiveSession(chatId);
+    if (!activeSessionId) {
+      pendingGroupNaming.set(chatId, { prompt: finalPrompt, meta: requestMeta });
+      await tg("sendMessage", {
+        chat_id: chatId,
+        text: t("sessions.group_ask_name"),
+        parse_mode: "HTML",
+      });
+      return;
+    }
+  }
 
   // Aggregate messages arriving within 1.5s (combine instead of replace)
   const existing = pendingDMText[chatId];
