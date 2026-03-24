@@ -68,6 +68,7 @@ function setOutputMode(mode) {
 let pendingSessionName = null;
 let planMode = false; // false = build (default), true = plan only
 const pendingGroupNaming = new Map(); // chatId → { prompt, meta } — waiting for session name in group
+const pendingNewNaming = new Set(); // chatId — waiting for session name after "New session" button
 const cronJobs = []; // [{label, fireAt, timer}]
 const pendingDMText = {}; // chatId → { prompt, timer } — buffer text to combine with following forward
 const pendingPhotos = {}; // chatId → { paths: [], caption, timer, meta } — buffer photos arriving together
@@ -213,7 +214,7 @@ async function sendMsg(chatId, text) {
     const res = await tg("sendMessage", {
       chat_id: chatId,
       text: chunk,
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
     });
     if (!res.ok) {
       await tg("sendMessage", { chat_id: chatId, text: chunk });
@@ -258,13 +259,17 @@ async function downloadTgFile(fileId, ext) {
 
 // ── Commands ────────────────────────────────────────────────────────
 
-function buildSessionList(chatId = "default") {
-  const sessions = listSessions(7);
+const PAGE_SIZE = 7;
+
+function buildSessionList(chatId = "default", page = 0) {
+  const { items: sessions, total } = listSessions(PAGE_SIZE, page * PAGE_SIZE);
   const { activeSessionId } = getActiveSession(chatId);
 
-  if (sessions.length === 0) return { text: t("sessions.empty"), buttons: [] };
+  if (total === 0) return { text: t("sessions.empty"), buttons: [] };
 
+  const totalPages = Math.ceil(total / PAGE_SIZE);
   let text = t("sessions.title");
+  if (totalPages > 1) text += `<i>Страница ${page + 1}/${totalPages}</i>\n`;
   const buttons = [];
 
   for (const s of sessions) {
@@ -282,6 +287,11 @@ function buildSessionList(chatId = "default") {
       { text: "🗑", callback_data: `del:${shortId}` },
     ]);
   }
+
+  const nav = [];
+  if (page > 0) nav.push({ text: "← Назад", callback_data: `ses:pg:${page - 1}` });
+  if ((page + 1) < totalPages) nav.push({ text: "Вперёд →", callback_data: `ses:pg:${page + 1}` });
+  if (nav.length > 0) buttons.push(nav);
 
   buttons.push([{ text: t("sessions.new_btn"), callback_data: "ses:new" }]);
   if (activeSessionId) {
@@ -420,7 +430,7 @@ async function showWelcome(chatId, userLangCode) {
 
 async function showHelp(chatId) {
   const { activeSessionId } = getActiveSession(chatId);
-  const sessions = listSessions(10);
+  const { items: sessions } = listSessions(10);
   const current = sessions.find((s) => s.sessionId === activeSessionId);
 
   let status;
@@ -545,12 +555,29 @@ async function handleCallback(cb) {
 
   if (data === "ses:new") {
     clearActiveSession(chatId);
-    await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.new_btn") });
+    resetTokens();
+    pendingNewNaming.add(chatId);
+    await tg("answerCallbackQuery", { callback_query_id: cb.id });
     await tg("editMessageText", {
       chat_id: chatId,
       message_id: cb.message.message_id,
       text: t("sessions.new_created"),
       parse_mode: "HTML",
+    });
+    await tg("sendMessage", { chat_id: chatId, text: t("sessions.ask_name"), parse_mode: "HTML" });
+    return;
+  }
+
+  if (data.startsWith("ses:pg:")) {
+    const page = parseInt(data.split(":")[2]) || 0;
+    const { text, buttons } = buildSessionList(chatId, page);
+    await tg("answerCallbackQuery", { callback_query_id: cb.id });
+    await tg("editMessageText", {
+      chat_id: chatId,
+      message_id: cb.message.message_id,
+      text,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: buttons },
     });
     return;
   }
@@ -568,7 +595,7 @@ async function handleCallback(cb) {
 
   if (data.startsWith("del:")) {
     const shortId = data.split(":")[1];
-    const sessions = listSessions(10);
+    const { items: sessions } = listSessions(10);
     const match = sessions.find((s) => s.sessionId.startsWith(shortId));
     if (match) {
       deleteSession(match.sessionId, match.projectDir);
@@ -957,7 +984,7 @@ async function handleCallback(cb) {
 
   if (data.startsWith("ses:")) {
     const shortId = data.split(":")[1];
-    const sessions = listSessions(10);
+    const { items: sessions } = listSessions(10);
     const match = sessions.find((s) => s.sessionId.startsWith(shortId));
 
     if (match) {
@@ -1301,7 +1328,7 @@ async function sendToClaude(chatId, prompt, meta = {}) {
       buildAndUpdateStreamMsg();
     }
     if (hadActivity) {
-      await tg("sendMessage", { chat_id: chatId, text: `✅ Готово${tokenInfo}`, parse_mode: "Markdown", disable_notification: true });
+      await tg("sendMessage", { chat_id: chatId, text: `✅ Готово${tokenInfo}`, parse_mode: "HTML", disable_notification: true });
     }
     return;
   }
@@ -1335,7 +1362,7 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     const sent = await sendMsg(chatId, result.output + tokenInfo);
     if (sent === 0) {
       // Output was empty after stripping — silent completion, notify user
-      await tg("sendMessage", { chat_id: chatId, text: `✅ Готово${tokenInfo}`, parse_mode: "Markdown", disable_notification: true });
+      await tg("sendMessage", { chat_id: chatId, text: `✅ Готово${tokenInfo}`, parse_mode: "HTML", disable_notification: true });
     }
   }
 
@@ -2151,6 +2178,18 @@ async function handleMessage(msg) {
     finalPrompt = `> ${replyText.replace(/\n/g, "\n> ")}\n\n${finalPrompt}`;
   }
   if (planMode) finalPrompt = t("plan.prefix", { prompt: finalPrompt });
+
+  // DM: if waiting for session name after "New session" button
+  if (pendingNewNaming.has(chatId)) {
+    pendingNewNaming.delete(chatId);
+    pendingSessionName = finalPrompt.trim();
+    await tg("sendMessage", {
+      chat_id: chatId,
+      text: t("sessions.new_named", { name: esc(pendingSessionName) }),
+      parse_mode: "HTML",
+    });
+    return;
+  }
 
   // Group: if waiting for session name, use this message as the name
   if (pendingGroupNaming.has(chatId)) {

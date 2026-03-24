@@ -252,7 +252,7 @@ function projectDirToName(dir) {
     || dir;
 }
 
-export function listSessions(limit = 10) {
+export function listSessions(limit = 10, offset = 0) {
   const state = getState();
   const sessions = [];
 
@@ -287,7 +287,7 @@ export function listSessions(limit = 10) {
   } catch {}
 
   sessions.sort((a, b) => b.modifiedAt - a.modifiedAt);
-  return sessions.slice(0, limit);
+  return { items: sessions.slice(offset, offset + limit), total: sessions.length };
 }
 
 // ── Working directory from project dir ──────────────────────────────
