@@ -272,6 +272,11 @@ export function listSessions(limit = 10, offset = 0) {
           const sessionId = basename(file, ".jsonl");
 
           const customName = state.sessionNames?.[sessionId];
+          // Check if this session is active in any chat
+          const ms = migrateState(state);
+          const isActive = Object.values(ms.activeSessions || {}).some(
+            (s) => s.sessionId === sessionId
+          );
           sessions.push({
             sessionId,
             projectDir: projDir,
@@ -279,7 +284,7 @@ export function listSessions(limit = 10, offset = 0) {
             displayName: customName || null,
             lastMessage: getLastUserMessage(filePath),
             modifiedAt: stat.mtime,
-            isActive: sessionId === state.activeSessionId,
+            isActive,
           });
         }
       } catch {}
