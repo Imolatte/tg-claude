@@ -60,7 +60,7 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd, chatId = "defa
       "--verbose",
       "--dangerously-skip-permissions",
       "--model", model,
-      "--strict-mcp-config", "--mcp-config", MCP_CONFIG_FILE,
+      "--mcp-config", MCP_CONFIG_FILE,
       "--disable-slash-commands",
     ];
 
