@@ -158,11 +158,9 @@ async function tg(method, body) {
   return res.json();
 }
 
-function splitMarkdown(text, limit = 4000) {
+function splitMessage(text, limit = 4000) {
   const chunks = [];
   let rest = text;
-  let inCodeBlock = false;
-  let codeBlockLang = "";
 
   while (rest.length > 0) {
     if (rest.length <= limit) {
@@ -172,30 +170,23 @@ function splitMarkdown(text, limit = 4000) {
 
     // Find best split point: last newline before limit
     let splitAt = rest.lastIndexOf("\n", limit);
-    if (splitAt < limit * 0.5) splitAt = limit; // no good newline, hard cut
+    if (splitAt < limit * 0.5) splitAt = limit;
 
     let chunk = rest.slice(0, splitAt);
 
-    // Track open code blocks in this chunk
-    const fenceMatches = [...chunk.matchAll(/^```/gm)];
-    const openFences = fenceMatches.length % 2 !== 0;
+    // Track unclosed <pre> tags — close at chunk boundary, reopen in next
+    const preOpens = (chunk.match(/<pre>/gi) || []).length;
+    const preCloses = (chunk.match(/<\/pre>/gi) || []).length;
+    const unclosedPre = preOpens > preCloses;
 
-    if (openFences) {
-      // Close the code block at end of chunk, reopen in next
-      const lastFenceIdx = chunk.lastIndexOf("\n```");
-      const lang = lastFenceIdx >= 0 ? "" : codeBlockLang;
-      chunk = chunk + "\n```";
-      codeBlockLang = lang;
-      inCodeBlock = true;
-    } else {
-      inCodeBlock = false;
-      codeBlockLang = "";
+    if (unclosedPre) {
+      chunk = chunk + "</code></pre>";
     }
 
     chunks.push(chunk);
     rest = rest.slice(splitAt).replace(/^\n/, "");
-    if (inCodeBlock && rest.length > 0) {
-      rest = "```" + (codeBlockLang || "") + "\n" + rest;
+    if (unclosedPre && rest.length > 0) {
+      rest = "<pre><code>" + rest;
     }
   }
 
@@ -211,8 +202,61 @@ function fixAmpersands(text) {
   return text.replace(/&(?!(?:amp|lt|gt|quot|apos);)/g, "&amp;");
 }
 
+/**
+ * Convert Markdown to Telegram HTML.
+ * Handles: fenced code blocks, inline code, bold, italic, strikethrough, headers, blockquotes, links.
+ * Leaves already-valid HTML tags untouched.
+ */
+function mdToTgHtml(text) {
+  // Protect existing HTML tags from escaping
+  const htmlPlaceholders = [];
+  let s = text.replace(/<(\/?)(?:b|i|u|s|code|pre|a|blockquote)(?: [^>]*)?>|<br\s*\/?>|&(?:amp|lt|gt|quot|apos);/gi, (m) => {
+    htmlPlaceholders.push(m);
+    return `\x00HTML${htmlPlaceholders.length - 1}\x00`;
+  });
+
+  // Escape HTML special chars in remaining text
+  s = s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Fenced code blocks: ```lang\ncode\n```
+  s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const cls = lang ? ` class="language-${lang}"` : "";
+    return `<pre><code${cls}>${code.replace(/\x00HTML(\d+)\x00/g, (__, i) => esc(htmlPlaceholders[+i]))}</code></pre>`;
+  });
+
+  // Inline code: `code`
+  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+
+  // Bold: **text** or __text__
+  s = s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  s = s.replace(/__(.+?)__/g, "<b>$1</b>");
+
+  // Italic: *text* or _text_ (but not inside words with underscores)
+  s = s.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, "<i>$1</i>");
+  s = s.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "<i>$1</i>");
+
+  // Strikethrough: ~~text~~
+  s = s.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+  // Headers: # Header → bold
+  s = s.replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>");
+
+  // Blockquotes: > text (consecutive lines merged)
+  s = s.replace(/^(?:&gt;|>) (.+)$/gm, "<blockquote>$1</blockquote>");
+  // Merge adjacent blockquotes
+  s = s.replace(/<\/blockquote>\n<blockquote>/g, "\n");
+
+  // Links: [text](url)
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  // Restore protected HTML
+  s = s.replace(/\x00HTML(\d+)\x00/g, (_, i) => htmlPlaceholders[+i]);
+
+  return s;
+}
+
 async function sendMsg(chatId, text) {
-  const chunks = splitMarkdown(fixAmpersands(stripSystemTags(text)));
+  const chunks = splitMessage(mdToTgHtml(stripSystemTags(text)));
   let sent = 0;
   for (const chunk of chunks) {
     if (!chunk.trim()) continue;
@@ -1313,18 +1357,20 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   const sessionKey = result.sessionId || null;
   let tokenInfo = "";
   let shouldWarnTokens = false;
+  let ctx = 0;
   if (result.usage) {
     const inp = result.usage.input_tokens || 0;
+    const cacheRead = result.usage.cache_read_input_tokens || 0;
+    ctx = inp + cacheRead; // real context: new tokens + previously cached (not cache_creation which is overhead)
     const out = result.usage.output_tokens || 0;
     addTokens(inp, out, sessionKey);
-    const scopeTotal = getScopeTokens(sessionKey);
     const CONTEXT_LIMIT = 200_000;
     const WARN_THRESHOLD = 190_000;
-    const bar = tokenProgressBar(scopeTotal, CONTEXT_LIMIT);
-    tokenInfo = `\n\n_↓${formatK(inp)} ↑${formatK(out)} · ${elapsed}s · ${bar}_`;
-    if (scopeTotal >= WARN_THRESHOLD && scopeTotal - (inp + out) < WARN_THRESHOLD) shouldWarnTokens = true;
+    const bar = tokenProgressBar(ctx, CONTEXT_LIMIT);
+    tokenInfo = `\n\n<i>↓${formatK(inp)} ↑${formatK(out)} · ${elapsed}s · ${bar}</i>`;
+    if (ctx >= WARN_THRESHOLD) shouldWarnTokens = true;
   } else {
-    tokenInfo = `\n\n_${elapsed}s_`;
+    tokenInfo = `\n\n<i>${elapsed}s</i>`;
   }
 
   console.log(`${result.success ? "✅" : "❌"} done in ${elapsed}s exit=${result.exitCode} output=${result.output?.slice(0,200)}`);
@@ -1375,11 +1421,10 @@ async function sendToClaude(chatId, prompt, meta = {}) {
 
   // Warn when approaching context limit (190k+ out of 200k)
   if (shouldWarnTokens) {
-    const scopeTotal = getScopeTokens(sessionKey);
-    console.log(`⚠️ Token warning: ${formatK(scopeTotal)}/200k`);
+    console.log(`⚠️ Token warning: ${formatK(ctx)}/200k`);
     await tg("sendMessage", {
       chat_id: chatId,
-      text: t("tokens.warn_limit", { used: formatK(scopeTotal) }),
+      text: t("tokens.warn_limit", { used: formatK(ctx) }),
       parse_mode: "HTML",
       disable_notification: false,
     });
