@@ -1366,10 +1366,10 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     const out = result.usage.output_tokens || 0;
     addTokens(inp, out, sessionKey);
     const CONTEXT_LIMIT = 200_000;
-    const WARN_THRESHOLD = 190_000;
-    const bar = tokenProgressBar(ctx, CONTEXT_LIMIT);
-    tokenInfo = `\n\n<i>↓${formatK(inp)} ↑${formatK(out)} · ${elapsed}s · ${bar}</i>`;
-    if (ctx >= WARN_THRESHOLD) shouldWarnTokens = true;
+    const pctLeft = Math.max(0, Math.round((1 - ctx / CONTEXT_LIMIT) * 100));
+    const contextWarning = pctLeft <= 20 ? ` · Context left until auto-compact: ${pctLeft}%` : "";
+    tokenInfo = `\n\n<i>↓${formatK(inp)} ↑${formatK(out)} · ${elapsed}s${contextWarning}</i>`;
+    shouldWarnTokens = pctLeft <= 5;
   } else {
     tokenInfo = `\n\n<i>${elapsed}s</i>`;
   }
