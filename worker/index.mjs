@@ -1365,7 +1365,7 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     ctx = inp + cacheRead; // real context: new tokens + previously cached (not cache_creation which is overhead)
     const out = result.usage.output_tokens || 0;
     addTokens(inp, out, sessionKey);
-    const CONTEXT_LIMIT = 200_000;
+    const CONTEXT_LIMIT = 1_000_000;
     const pctLeft = Math.max(0, Math.round((1 - ctx / CONTEXT_LIMIT) * 100));
     const contextWarning = pctLeft <= 20 ? ` · Context left until auto-compact: ${pctLeft}%` : "";
     tokenInfo = `\n\n<i>↓${formatK(inp)} ↑${formatK(out)} · ${elapsed}s${contextWarning}</i>`;
