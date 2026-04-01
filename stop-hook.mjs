@@ -48,6 +48,20 @@ async function main() {
   } catch {}
   writeFileSync(LAST_NOTIFIED_FILE, String(Date.now()));
 
+  // Sync terminal session to bot's state.json
+  try {
+    const sessionId = input.session_id;
+    const cwd = input.cwd || process.cwd();
+    if (sessionId && cwd) {
+      const stateFile = join(__dirname, "worker", "state.json");
+      const state = JSON.parse(readFileSync(stateFile, "utf-8"));
+      if (!state.activeSessions) state.activeSessions = {};
+      const projectDir = cwd.replace(/\//g, "-");
+      state.activeSessions["terminal"] = { sessionId, projectDir, cwd };
+      writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
+    }
+  } catch {}
+
   // Extract last assistant text from transcript
   const messages = input.messages || [];
   let lastText = "";

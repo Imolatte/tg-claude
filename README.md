@@ -85,6 +85,72 @@ Token usage shown after each response: `↓3.2k ↑17k · 4.5s · ████�
 - `/detach` — disconnect; `/cd <path>` — change working directory
 - Token usage tracking with warning at 190k (auto-compaction by Claude Code CLI)
 
+### Terminal ↔ Telegram Session Sync *(experimental — testing)*
+
+> **Status:** feature is being tested. The problem: terminal and Telegram use separate Claude Code sessions, so progress/context is lost when switching between them.
+
+One shared session between terminal and Telegram. Both read/write to `worker/state.json`. The session itself is a single `.jsonl` file on disk — not a copy, the same conversation.
+
+#### How it works
+
+**Telegram → Terminal:**
+1. You work in terminal → session `.jsonl` file gets updated
+2. You switch to Telegram and send a message
+3. Bot detects a newer session exists → asks "Switch to **session-name**?" with ✅/❌ buttons
+4. ✅ — bot resumes the terminal session. ❌ — stays in current, pins it (no more prompts)
+
+**Terminal → Telegram:**
+1. You work in Telegram → bot saves session to `state.json`
+2. You switch to terminal and run `cc`
+3. `cc` reads `state.json`, finds the freshest session, `cd`s into its project directory, and runs `claude --resume <id>`
+
+**New session in Telegram:**
+- `/new` in Telegram creates a session in the same project directory as the previous one (or whatever you set via `/cd`)
+- After first message, `cc` in terminal will pick it up
+
+#### The `cc` command
+
+Use `cc` instead of `claude` to continue the shared session. Works from any directory — auto-navigates to the project.
+
+```bash
+cc                    # resume the most recent shared session
+cc "fix the bug"      # resume with a prompt
+```
+
+If no shared session found — falls back to `claude -c` (standard "continue last").
+
+#### Pinned sessions
+
+When you manually select a session via `/sessions` in Telegram, it gets **pinned** — the bot won't suggest switching away from it. The pin is cleared after the next Claude run, so the auto-detect resumes naturally.
+
+Declining a switch (❌) also pins the current session.
+
+#### Setup
+
+1. Copy `cc` to your PATH:
+   ```bash
+   cp scripts/cc ~/.local/bin/cc && chmod +x ~/.local/bin/cc
+   ```
+2. Add the Stop hook to `~/.claude/settings.json` (syncs terminal sessions to `state.json`):
+   ```json
+   {
+     "hooks": {
+       "Stop": [{
+         "hooks": [{
+           "type": "command",
+           "command": "node /path/to/tg-claude/stop-hook.mjs",
+           "timeout": 10
+         }]
+       }]
+     }
+   }
+   ```
+
+#### Known limitations
+- `cc` picks the **most recent** session across all projects — if you have multiple active projects, it may pick the wrong one
+- Terminal sessions only sync to `state.json` when Claude finishes a turn (Stop hook), not mid-conversation
+- If a session is deleted in Telegram, terminal gets "session not found" — just run `claude` to start fresh
+
 ### Approval System
 Dangerous operations require your approval via Telegram inline buttons:
 - `git push/reset/clean`, `rm -rf`, Docker commands

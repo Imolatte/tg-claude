@@ -58,6 +58,12 @@ const locales = {
     "sessions.renamed": '✅ Session renamed to <b>{name}</b>',
     "sessions.name_usage": "Usage: /name title",
     "sessions.attached": '▶️ Attached to: <b>{title}</b>\n<code>{msg}</code>',
+    "sessions.switch_ask": '🔄 Newer session found: <b>{newer}</b>\n\nCurrent: {current}\n\nSwitch?',
+    "sessions.switch_yes": "✅",
+    "sessions.switch_no": "❌",
+    "sessions.switched": '✅ Switched to: <b>{name}</b>',
+    "sessions.switch_stayed": '▶️ Staying in: <b>{name}</b>',
+    "sessions.switch_expired": "Request expired",
 
     // ── Time ──
     "time.now": "just now",
@@ -271,6 +277,12 @@ const locales = {
     "sessions.renamed": "✅ Сессия переименована в <b>{name}</b>",
     "sessions.name_usage": "Использование: /name имя",
     "sessions.attached": '▶️ Подключен к: <b>{title}</b>\n<code>{msg}</code>',
+    "sessions.switch_ask": '🔄 Найдена более свежая сессия: <b>{newer}</b>\n\nТекущая: {current}\n\nПереключиться?',
+    "sessions.switch_yes": "✅",
+    "sessions.switch_no": "❌",
+    "sessions.switched": '✅ Переключено на: <b>{name}</b>',
+    "sessions.switch_stayed": '▶️ Остаёмся в: <b>{name}</b>',
+    "sessions.switch_expired": "Запрос устарел",
 
     // ── Time ──
     "time.now": "только что",

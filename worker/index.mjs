@@ -24,7 +24,7 @@ await new Promise((resolve, reject) => {
 });
 
 const HOME = homedir();
-import { runClaude, killActiveChild } from "./executor.mjs";
+import { runClaude, killActiveChild, checkNewerSession } from "./executor.mjs";
 import { transcribeVoice, getVoiceLang, setVoiceLang } from "./voice.mjs";
 import {
   listSessions, setActiveSession, clearActiveSession, getActiveSession,
@@ -35,7 +35,7 @@ import {
   getTokenRotationLimit, setTokenRotationLimit, isSetupDone, markSetupDone,
   getOs, setOs,
   getAllowedUsers, addAllowedUser, removeAllowedUser,
-
+  isSessionPinned,
 } from "./sessions.mjs";
 import { t, getLang, setLang, loadLang, availableLangs } from "./locale.mjs";
 
@@ -68,6 +68,7 @@ function setOutputMode(mode) {
 let pendingSessionName = null;
 let planMode = false; // false = build (default), true = plan only
 const pendingGroupNaming = new Map(); // chatId → { prompt, meta } — waiting for session name in group
+const pendingSessionSwitch = new Map(); // chatId → { prompt, meta, newerSessionId, projectDir }
 const pendingNewNaming = new Set(); // chatId — waiting for session name after "New session" button
 const cronJobs = []; // [{label, fireAt, timer}]
 const pendingDMText = {}; // chatId → { prompt, timer } — buffer text to combine with following forward
@@ -117,6 +118,24 @@ function getChatQueue(chatId) {
 async function enqueue(chatId, prompt, meta = {}) {
   const state = getChatQueue(chatId);
   if (!state.busy) {
+    // Check if there's a newer session (e.g. from terminal) before running
+    const newer = checkNewerSession(chatId);
+    if (newer) {
+      pendingSessionSwitch.set(chatId, { prompt, meta, ...newer });
+      await tg("sendMessage", {
+        chat_id: chatId,
+        text: t("sessions.switch_ask", { newer: esc(newer.newerName), current: esc(newer.currentName) }),
+        parse_mode: "HTML",
+        reply_markup: JSON.stringify({
+          inline_keyboard: [[
+            { text: t("sessions.switch_yes"), callback_data: "switch:yes" },
+            { text: t("sessions.switch_no"), callback_data: "switch:no" },
+          ]],
+        }),
+      });
+      return;
+    }
+
     state.busy = true;
     try {
       await sendToClaude(chatId, prompt, meta);
@@ -604,6 +623,44 @@ async function handleCallback(cb) {
   const data = cb.data;
   const chatId = String(cb.message?.chat?.id || OWNER_CHAT_ID);
 
+  // ── Session switch confirmation ──
+  if (data === "switch:yes" || data === "switch:no") {
+    const pending = pendingSessionSwitch.get(chatId);
+    if (!pending) {
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.switch_expired") });
+      return;
+    }
+    pendingSessionSwitch.delete(chatId);
+
+    if (data === "switch:yes") {
+      // Switch to the newer session
+      const cwd = getCustomCwd() || getActiveSession(chatId).activeCwd || HOME;
+      setActiveSession(pending.newerSessionId, pending.projectDir, cwd, chatId);
+      await tg("answerCallbackQuery", { callback_query_id: cb.id });
+      await tg("editMessageText", {
+        chat_id: chatId,
+        message_id: cb.message.message_id,
+        text: t("sessions.switched", { name: esc(pending.newerName) }),
+        parse_mode: "HTML",
+      });
+    } else {
+      // Pin current session so checkNewerSession won't ask again
+      const cwd = getCustomCwd() || getActiveSession(chatId).activeCwd || HOME;
+      setActiveSession(pending.currentSessionId, pending.projectDir, cwd, chatId, { pinned: true });
+      await tg("answerCallbackQuery", { callback_query_id: cb.id });
+      await tg("editMessageText", {
+        chat_id: chatId,
+        message_id: cb.message.message_id,
+        text: t("sessions.switch_stayed", { name: esc(pending.currentName) }),
+        parse_mode: "HTML",
+      });
+    }
+
+    // Now send the pending prompt
+    await enqueue(chatId, pending.prompt, pending.meta);
+    return;
+  }
+
   if (data === "ses:new") {
     clearActiveSession(chatId);
     resetTokens();
@@ -1041,7 +1098,7 @@ async function handleCallback(cb) {
 
     if (match) {
       const matchCwd = getWorkingDir(match.projectDir);
-      setActiveSession(match.sessionId, match.projectDir, matchCwd, chatId);
+      setActiveSession(match.sessionId, match.projectDir, matchCwd, chatId, { pinned: true });
       const title = match.displayName || match.projectName;
       await tg("answerCallbackQuery", { callback_query_id: cb.id, text: `▶️ ${title}` });
       await tg("editMessageText", {
@@ -1336,6 +1393,7 @@ async function sendToClaude(chatId, prompt, meta = {}) {
   clearInterval(statusInterval);
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
+
   // Auto-save session for continuity — but only if user didn't manually switch session while Claude was running
   if (result.sessionId) {
     const currentSession = getActiveSession(chatId).activeSessionId;
@@ -1343,7 +1401,8 @@ async function sendToClaude(chatId, prompt, meta = {}) {
     if (!sessionChangedByUser) {
       const projDir = result.projectDir || getActiveSession(chatId).activeProjectDir || "";
       const savedCwd = result.cwd || getActiveSession(chatId).activeCwd;
-      setActiveSession(result.sessionId, projDir, savedCwd, chatId);
+      const wasPinned = isSessionPinned(chatId);
+      setActiveSession(result.sessionId, projDir, savedCwd, chatId, { pinned: wasPinned });
       if (pendingSessionName) {
         renameSession(result.sessionId, pendingSessionName);
         console.log(`📎 Session: ${result.sessionId.slice(0, 8)}… "${pendingSessionName}" cwd=${savedCwd}`);

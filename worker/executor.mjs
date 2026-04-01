@@ -3,7 +3,30 @@ import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
-import { getActiveSession, getModel, getCustomCwd, clearActiveSession } from "./sessions.mjs";
+import { getActiveSession, getModel, getCustomCwd, clearActiveSession, getLatestSessionForProject, isSessionPinned, getSessionName, getLastUserMessageForSession } from "./sessions.mjs";
+
+/**
+ * Check if there's a newer session for this chat's project.
+ * Returns { currentName, newerSessionId, newerName } or null.
+ */
+export function checkNewerSession(chatId = "default") {
+  if (isSessionPinned(chatId)) return null;
+  const { activeSessionId, activeProjectDir, activeCwd } = getActiveSession(chatId);
+  const cwd = getCustomCwd() || activeCwd;
+  const projectDir = activeProjectDir || (cwd ? cwd.replace(/\//g, "-") : null);
+  if (!projectDir) return null;
+
+  const latestId = getLatestSessionForProject(projectDir);
+  if (!latestId || latestId === activeSessionId) return null;
+
+  return {
+    currentSessionId: activeSessionId,
+    currentName: (activeSessionId && (getSessionName(activeSessionId) || getLastUserMessageForSession(activeSessionId, projectDir))) || "(нет сессии)",
+    newerSessionId: latestId,
+    newerName: getSessionName(latestId) || getLastUserMessageForSession(latestId, projectDir),
+    projectDir,
+  };
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let _configTimeout = 300000; // 5 min default
@@ -168,7 +191,7 @@ function spawnClaude(prompt, onEvent, { sessionId: resumeId, cwd, chatId = "defa
  * Run Claude. If --resume fails, retry without it (stale session).
  */
 export async function runClaude(prompt, onEvent, chatId = "default") {
-  let { activeSessionId, activeCwd } = getActiveSession(chatId);
+  let { activeSessionId, activeProjectDir, activeCwd } = getActiveSession(chatId);
 
   // No session fallback to owner DM — each chat gets its own isolated session
 

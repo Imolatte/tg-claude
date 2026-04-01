@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Continue the most recent shared session (synced between terminal and Telegram bot)
+# Auto-navigates to the session's project directory
+
+STATE_FILE="$HOME/develop/tg-claude/worker/state.json"
+
+if [[ ! -f "$STATE_FILE" ]]; then
+  exec claude -c "$@"
+fi
+
+read -r SESSION_ID SESSION_CWD < <(python3 -c "
+import json, os
+state = json.load(open('$STATE_FILE'))
+sessions = state.get('activeSessions', {})
+
+candidates = []
+for key, s in sessions.items():
+    sid = s.get('sessionId')
+    pdir = s.get('projectDir', '')
+    if not sid or not pdir:
+        continue
+    jpath = os.path.expanduser(f'~/.claude/projects/{pdir}/{sid}.jsonl')
+    if os.path.exists(jpath):
+        candidates.append((os.path.getmtime(jpath), sid, s.get('cwd', '')))
+
+if candidates:
+    candidates.sort(reverse=True)
+    print(candidates[0][1], candidates[0][2])
+" 2>/dev/null)
+
+if [[ -n "$SESSION_ID" && -n "$SESSION_CWD" && -d "$SESSION_CWD" ]]; then
+  cd "$SESSION_CWD"
+  exec claude --resume "$SESSION_ID" "$@"
+elif [[ -n "$SESSION_ID" ]]; then
+  exec claude --resume "$SESSION_ID" "$@"
+else
+  exec claude -c "$@"
+fi

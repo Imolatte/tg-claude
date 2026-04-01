@@ -49,11 +49,16 @@ export function getActiveSession(chatId = "default") {
   };
 }
 
-export function setActiveSession(sessionId, projectDir, cwd, chatId = "default") {
+export function setActiveSession(sessionId, projectDir, cwd, chatId = "default", { pinned = false } = {}) {
   const state = migrateState(getState());
   if (!state.activeSessions) state.activeSessions = {};
-  state.activeSessions[chatId] = { sessionId, projectDir: projectDir || null, cwd: cwd || null };
+  state.activeSessions[chatId] = { sessionId, projectDir: projectDir || null, cwd: cwd || null, pinned };
   saveState(state);
+}
+
+export function isSessionPinned(chatId = "default") {
+  const state = migrateState(getState());
+  return !!state.activeSessions?.[chatId]?.pinned;
 }
 
 export function clearActiveSession(chatId = "default") {
@@ -244,6 +249,14 @@ function getLastUserMessage(filePath) {
   return "(empty session)";
 }
 
+export function getLastUserMessageForSession(sessionId, projectDir) {
+  try {
+    const filePath = join(CLAUDE_PROJECTS_DIR, projectDir, `${sessionId}.jsonl`);
+    return getLastUserMessage(filePath);
+  } catch {}
+  return "(unknown session)";
+}
+
 function projectDirToName(dir) {
   const homePrefix = HOME.replace(/\//g, "-").replace(/^-/, "");
   return dir
@@ -293,6 +306,28 @@ export function listSessions(limit = 10, offset = 0) {
 
   sessions.sort((a, b) => b.modifiedAt - a.modifiedAt);
   return { items: sessions.slice(offset, offset + limit), total: sessions.length };
+}
+
+// ── Find latest session for a project (cross-terminal/telegram) ─────
+
+export function getLatestSessionForProject(projectDir) {
+  if (!projectDir) return null;
+  try {
+    const fullProjDir = join(CLAUDE_PROJECTS_DIR, projectDir);
+    const files = readdirSync(fullProjDir).filter((f) => f.endsWith(".jsonl"));
+    let latest = null;
+    let latestMtime = 0;
+    for (const file of files) {
+      const filePath = join(fullProjDir, file);
+      const mtime = statSync(filePath).mtimeMs;
+      if (mtime > latestMtime) {
+        latestMtime = mtime;
+        latest = basename(file, ".jsonl");
+      }
+    }
+    return latest;
+  } catch {}
+  return null;
 }
 
 // ── Working directory from project dir ──────────────────────────────
