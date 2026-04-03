@@ -1,4 +1,4 @@
-# TG Claude
+# Claude Code ↔ Telegram
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org)
@@ -27,9 +27,9 @@ You (Telegram) → Bot (Node.js) → Claude Code CLI → tools → response → 
 
 Anthropic's [official Telegram plugin](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram) is a minimal MCP bridge — 3 tools, no history, no session management.
 
-**TG Claude** is a full remote terminal: sessions, streaming progress, approval system for dangerous ops, git panel, voice input, file/photo handling, Mac remote control, and 30+ commands — all from your phone.
+**Claude Code ↔ Telegram** is a full remote terminal: sessions, streaming progress, approval system for dangerous ops, git panel, voice input, file/photo handling, Mac remote control, and 30+ commands - all from your phone.
 
-| | Official Plugin | TG Claude |
+| | Official Plugin | Claude Code ↔ Telegram |
 |---|---|---|
 | Architecture | MCP bridge | Full bot wrapper around CLI |
 | Session management | None | Auto-resume, rotate, switch, rename |
