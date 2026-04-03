@@ -6,3 +6,8 @@ worker/state.json
 worker/tmp/
 worker/history/
 server/
+.DS_Store
+assets/.DS_Store
+bot.log
+test.txt
+HANDOFF.md
