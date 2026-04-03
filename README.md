@@ -76,27 +76,34 @@ With `/codediff` enabled, edits show inline diffs:
 + import { getRegion, USDT_PRICE } from './geo'
 ```
 
-Token usage shown after each response: `↓3.2k ↑17k · 4.5s · ████░░░░ 52k/100k`
+Token usage shown after each response: `↓3.2k ↑17k · 4.5s`
 
 ### Session Management
 - Auto-resume sessions across messages (`--resume`)
 - `/sessions` — inline keyboard to switch/delete
 - `/new [name]` — start fresh; `/name <title>` — rename
 - `/detach` — disconnect; `/cd <path>` — change working directory
-- Token usage tracking with warning at 190k (auto-compaction by Claude Code CLI)
+- Token usage tracking per session
 
 ### Approval System
-Dangerous operations require your approval via Telegram inline buttons:
+Dangerous operations require your approval:
 - `git push/reset/clean`, `rm -rf`, Docker commands
 - DB migrations (`prisma migrate`, `DROP TABLE`)
 - Deploys (`vercel --prod`, `npm publish`)
 - Sensitive file edits (`.env`, `docker-compose`, CI configs)
 
+**Dual-channel approval** (terminal sessions):
+1. Terminal shows its normal permission prompt
+2. If unanswered for 5 minutes, Telegram sends inline buttons
+3. Tap Approve/Deny on your phone - terminal prompt resolves automatically via TTY injection
+
+**Telegram sessions**: inline buttons sent immediately as before.
+
 ### Output Modes
 
 | Mode | Responses | Approvals | Use case |
 |------|-----------|-----------|----------|
-| `terminal` | Terminal | Terminal | At desk |
+| `terminal` | Terminal | Terminal (+ TG after 5 min) | At desk |
 | `hybrid` | Terminal | Telegram | Away, approvals on phone |
 | `telegram` | Telegram | Telegram | Fully remote |
 
@@ -251,15 +258,16 @@ worker/
   voice.mjs            Groq STT with local Whisper fallback
   mcp-telegram.mjs     MCP server: send_telegram + send_file_telegram
 
-approval-hook.mjs      PreToolUse hook → Telegram approval buttons
+approval-hook.mjs      PreToolUse hook → dual-channel approval (terminal + TG)
 stop-hook.mjs          Stop hook → Telegram completion notification
+CLAUDE.md              Project context for Claude Code sessions
 mode.mjs               CLI: switch output mode (terminal/hybrid/telegram)
 bot-system-prompt.md   System prompt appended to Claude Code
 config.json            Credentials (gitignored)
 ```
 
 **Design principles:**
-- Zero runtime dependencies (except Puppeteer for optional screenshots)
+- Minimal runtime dependencies (Puppeteer optional for screenshots)
 - No frameworks — vanilla Node.js, ESM modules
 - Single-process architecture — one `node index.mjs` runs everything
 - File-based IPC between hooks and bot (via `/tmp/` files)
