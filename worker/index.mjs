@@ -756,9 +756,30 @@ async function handleCallback(cb) {
     const opId = parts[1];
     const decision = parts[2]; // "allow" or "deny"
 
-    // Write result file for the approval hook to pick up
-    const resultFile = join("/tmp", `claude-approval-${opId}.result`);
-    writeFileSync(resultFile, JSON.stringify({ decision }));
+    // Check if this is a terminal approval (has pending marker with TTY)
+    let isTerminalApproval = false;
+    const markerPath = "/tmp/claude-tg-pending-approval";
+    try {
+      if (existsSync(markerPath)) {
+        const marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+        if (marker.opId === opId && marker.ttyPath) {
+          isTerminalApproval = true;
+          // Write keystroke to terminal TTY - resolves Claude Code's permission prompt
+          // Claude Code shows: 1. Allow once  2. Allow always  3. Deny
+          const key = decision === "allow" ? "1" : "3";
+          writeFileSync(marker.ttyPath, key + "\n");
+          try { unlinkSync(markerPath); } catch {}
+        }
+      }
+    } catch (e) {
+      // TTY write failed - fall back to result file
+    }
+
+    // For TG sessions (hook is blocking and polling): write result file
+    if (!isTerminalApproval) {
+      const resultFile = join("/tmp", `claude-approval-${opId}.result`);
+      writeFileSync(resultFile, JSON.stringify({ decision }));
+    }
 
     const emoji = decision === "allow" ? "✅" : "❌";
     const status = decision === "allow" ? t("approval.approved") : t("approval.denied");
@@ -2446,12 +2467,12 @@ function startAutoSleepWatcher() {
   }, INTERVAL_MS);
 }
 
-// ── Pending approval reminder ───────────────────────────────────────
-// If a dangerous op is waiting for approval in the terminal for >3 min,
-// send a reminder to Telegram (the actual approval stays in terminal).
+// ── Pending approval → TG buttons after 5 min ──────────────────────
+// If terminal approval is unanswered for 5 min, send TG buttons.
+// When user taps a button, worker writes keystroke to terminal TTY.
 
 const PENDING_APPROVAL_FILE = "/tmp/claude-tg-pending-approval";
-const APPROVAL_REMINDER_MS = 3 * 60 * 1000; // 3 min
+const APPROVAL_WAIT_MS = 5 * 60 * 1000; // 5 min before sending TG buttons
 
 function startApprovalWatcher() {
   setInterval(() => {
@@ -2459,15 +2480,39 @@ function startApprovalWatcher() {
       if (!existsSync(PENDING_APPROVAL_FILE)) return;
       const data = JSON.parse(readFileSync(PENDING_APPROVAL_FILE, "utf-8"));
       const age = Date.now() - data.ts;
-      if (age < APPROVAL_REMINDER_MS) return;
-      // Send reminder and delete marker
-      unlinkSync(PENDING_APPROVAL_FILE);
+
+      // Not yet time to notify
+      if (age < APPROVAL_WAIT_MS) return;
+
+      // Already sent buttons (marker has .notified flag)
+      if (data.notified) {
+        // Clean up stale markers older than 10 min (terminal probably answered)
+        if (age > 10 * 60 * 1000) unlinkSync(PENDING_APPROVAL_FILE);
+        return;
+      }
+
+      // Send TG buttons
       const mins = Math.round(age / 60000);
       tg("sendMessage", {
         chat_id: OWNER_CHAT_ID,
-        text: t("approval.pending_terminal", { min: mins, tool: esc(data.toolName), detail: esc(data.detail) }),
+        text: [
+          `⚠️ <b>${t("approval.dangerous_op")}</b> (${mins} min)`,
+          ``,
+          `<b>${t("approval.what")}</b> ${esc(data.toolName)}`,
+          `<code>${esc(data.detail)}</code>`,
+        ].join("\n"),
         parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[
+            { text: t("approval.yes_btn"), callback_data: `op:${data.opId}:allow` },
+            { text: t("approval.no_btn"), callback_data: `op:${data.opId}:deny` },
+          ]],
+        },
       }).catch(() => {});
+
+      // Mark as notified so we don't send again
+      data.notified = true;
+      writeFileSync(PENDING_APPROVAL_FILE, JSON.stringify(data));
     } catch {}
   }, 30_000); // check every 30s
 }

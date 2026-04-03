@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { execSync } from "child_process";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { t, loadLang, getLang } from "./worker/locale.mjs";
@@ -342,21 +343,30 @@ async function main() {
     } catch {}
   }
 
-  // Terminal mode → no decision, Claude Code's built-in prompt handles it
-  // Write a marker file so the bot can send a TG reminder if unanswered for 3 min
+  // Terminal mode → Claude Code shows its prompt (1/2/3)
+  // If unanswered for 5 min → worker sends TG buttons → user approves from phone
+  // → worker writes keystroke to terminal TTY → prompt resolves
   if (!useTgApproval()) {
     const detail = getDetail(toolName, toolInput);
+    const opId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Discover terminal TTY for remote approval
+    let ttyPath = null;
     try {
-      writeFileSync("/tmp/claude-tg-pending-approval", JSON.stringify({
-        toolName,
-        detail: detail.slice(0, 300),
-        ts: Date.now(),
-      }));
+      const ttyRaw = execSync(`ps -p ${process.ppid} -o tty= 2>/dev/null`).toString().trim();
+      if (ttyRaw && ttyRaw !== "??") ttyPath = `/dev/tty${ttyRaw}`;
     } catch {}
+
+    // Write marker file — worker watches it and sends TG buttons after 5 min
+    writeFileSync("/tmp/claude-tg-pending-approval", JSON.stringify({
+      toolName, detail: detail.slice(0, 300), ts: Date.now(), opId, ttyPath,
+    }));
+
+    // Exit with no decision → terminal prompt shows as usual
     process.exit(0);
   }
 
-  // Hybrid or Telegram mode → ask via TG buttons
+  // Telegram/hybrid mode → block and wait for TG buttons (existing flow)
   const detail = getDetail(toolName, toolInput);
   const description = toolInput.description || "";
   const approved = await requestTelegramApproval(toolName, detail, description);
