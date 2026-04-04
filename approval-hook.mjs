@@ -25,7 +25,7 @@ const config = JSON.parse(readFileSync(join(__dirname, "config.json"), "utf-8"))
 
 const BOT_TOKEN = config.botToken;
 const CHAT_ID = config.chatId;
-const TIMEOUT_MS = parseInt(config.timeoutMs || "300000", 10);
+const TIMEOUT_MS = parseInt(config.timeoutMs || "0", 10);
 const MODE_FILE = "/tmp/claude-output-channel";
 const PID_FILE = "/tmp/claude-tg-worker.pid";
 const TYPING_TS_FILE = "/tmp/claude-tg-typing-ts";
@@ -224,11 +224,9 @@ async function requestTelegramApproval(toolName, detail, description) {
     ? pollFile(opId, signal)
     : pollTelegram(opId, signal);
 
-  const timeout = new Promise((resolve) =>
-    setTimeout(() => resolve(null), TIMEOUT_MS)
-  );
-
-  const decision = await Promise.race([tgPoll, timeout]);
+  const decision = TIMEOUT_MS > 0
+    ? await Promise.race([tgPoll, new Promise((resolve) => setTimeout(() => resolve(null), TIMEOUT_MS))])
+    : await tgPoll;
   ac.abort();
 
   try { unlinkSync(resultPath(opId)); } catch {}
