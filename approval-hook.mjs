@@ -65,10 +65,14 @@ const SENSITIVE_FILES = [
   /next\.config/, /vercel\.json/, /\.npmrc/, /\.gitignore$/,
 ];
 
+function isRemoteCommand(cmd) {
+  return /^(sshpass\s|ssh\s)/.test(cmd.trim());
+}
+
 function classify(toolName, toolInput) {
   if (toolName === "Bash") {
     const cmd = toolInput.command || "";
-    if (DANGEROUS_COMMANDS.some((dc) => cmd.includes(dc))) return "danger";
+    if (!isRemoteCommand(cmd) && DANGEROUS_COMMANDS.some((dc) => cmd.includes(dc))) return "danger";
   }
   if (toolName === "Write" || toolName === "Edit") {
     const path = toolInput.file_path || "";
