@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { join, dirname, basename } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -7,6 +7,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
 const CLAUDE_PROJECTS_DIR = join(HOME, ".claude", "projects");
 const STATE_FILE = join(__dirname, "state.json");
+
+// Project dirs to ignore everywhere (bot's own internal sessions).
+const SKIP_DIRS = ["telegram-bridge", "telegram/bridge", "tg-claude-worker", "tg-claude/worker"];
+const isSkippedDir = (dir) => SKIP_DIRS.some((s) => dir.includes(s));
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -201,20 +205,91 @@ export function markSetupDone() {
   saveState(state);
 }
 
+// Soft delete: mark the session as hidden in bot state. The .jsonl file is
+// NOT touched, so `claude --resume` in the terminal still works. Keeps any
+// custom name so unhide restores everything.
 export function deleteSession(sessionId, projectDir) {
+  hideSession(sessionId, projectDir);
+}
+
+export function getHiddenSessions() {
+  return getState().hiddenSessions || {};
+}
+
+export function isSessionHidden(sessionId) {
+  const h = getState().hiddenSessions || {};
+  return !!h[sessionId];
+}
+
+export function hideSession(sessionId, projectDir) {
   const state = getState();
-  try {
-    const filePath = join(CLAUDE_PROJECTS_DIR, projectDir, `${sessionId}.jsonl`);
-    unlinkSync(filePath);
-  } catch {}
-  if (state.sessionNames?.[sessionId]) {
-    delete state.sessionNames[sessionId];
-  }
-  if (state.activeSessionId === sessionId) {
-    state.activeSessionId = null;
-    state.activeProjectDir = null;
-  }
+  if (!state.hiddenSessions) state.hiddenSessions = {};
+  state.hiddenSessions[sessionId] = {
+    hiddenAt: new Date().toISOString(),
+    projectDir: projectDir || null,
+  };
   saveState(state);
+}
+
+export function unhideSession(sessionId) {
+  const state = getState();
+  if (state.hiddenSessions?.[sessionId]) {
+    delete state.hiddenSessions[sessionId];
+    saveState(state);
+  }
+}
+
+// Returns chatIds whose currently-active session is in the given sessionIds list.
+export function getChatsWithActiveSession(sessionIds) {
+  const set = new Set(sessionIds);
+  const state = migrateState(getState());
+  const result = [];
+  for (const [chatId, s] of Object.entries(state.activeSessions || {})) {
+    if (s?.sessionId && set.has(s.sessionId)) result.push(chatId);
+  }
+  return result;
+}
+
+// Bulk-hide all sessions whose .jsonl mtime is older than `days` days.
+// Skips sessions that are currently active in any chat. Returns the array
+// of sessionIds that were newly hidden.
+export function bulkHideOlderThan(days) {
+  const cutoff = Date.now() - days * 86400000;
+  const state = migrateState(getState());
+  if (!state.hiddenSessions) state.hiddenSessions = {};
+
+  const activeIds = new Set();
+  for (const s of Object.values(state.activeSessions || {})) {
+    if (s?.sessionId) activeIds.add(s.sessionId);
+  }
+
+  const hiddenIds = [];
+  try {
+    const projectDirs = readdirSync(CLAUDE_PROJECTS_DIR);
+    for (const projDir of projectDirs) {
+      if (isSkippedDir(projDir)) continue;
+      const fullProjDir = join(CLAUDE_PROJECTS_DIR, projDir);
+      let files;
+      try { files = readdirSync(fullProjDir).filter((f) => f.endsWith(".jsonl")); }
+      catch { continue; }
+      for (const file of files) {
+        const sessionId = basename(file, ".jsonl");
+        if (state.hiddenSessions[sessionId]) continue;
+        if (activeIds.has(sessionId)) continue;
+        let stat;
+        try { stat = statSync(join(fullProjDir, file)); } catch { continue; }
+        if (stat.mtime.getTime() < cutoff) {
+          state.hiddenSessions[sessionId] = {
+            hiddenAt: new Date().toISOString(),
+            projectDir: projDir,
+          };
+          hiddenIds.push(sessionId);
+        }
+      }
+    }
+  } catch {}
+  saveState(state);
+  return hiddenIds;
 }
 
 // ── Scan real Claude Code sessions ──────────────────────────────────
@@ -252,17 +327,17 @@ function projectDirToName(dir) {
     || dir;
 }
 
-export function listSessions(limit = 10, offset = 0) {
+export function listSessions(limit = 10, offset = 0, opts = {}) {
+  const { onlyHidden = false, includeHidden = false } = opts;
   const state = getState();
+  const hidden = state.hiddenSessions || {};
   const sessions = [];
-
-  const SKIP_DIRS = ["telegram-bridge", "telegram/bridge", "tg-claude-worker", "tg-claude/worker"];
 
   try {
     const projectDirs = readdirSync(CLAUDE_PROJECTS_DIR);
 
     for (const projDir of projectDirs) {
-      if (SKIP_DIRS.some((s) => projDir.includes(s))) continue;
+      if (isSkippedDir(projDir)) continue;
       const fullProjDir = join(CLAUDE_PROJECTS_DIR, projDir);
       try {
         const files = readdirSync(fullProjDir).filter((f) => f.endsWith(".jsonl"));
@@ -270,6 +345,13 @@ export function listSessions(limit = 10, offset = 0) {
           const filePath = join(fullProjDir, file);
           const stat = statSync(filePath);
           const sessionId = basename(file, ".jsonl");
+
+          const isHidden = !!hidden[sessionId];
+          if (onlyHidden) {
+            if (!isHidden) continue;
+          } else if (!includeHidden && isHidden) {
+            continue;
+          }
 
           const customName = state.sessionNames?.[sessionId];
           // Check if this session is active in any chat

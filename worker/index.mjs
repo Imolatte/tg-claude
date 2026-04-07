@@ -28,7 +28,8 @@ import { runClaude, killActiveChild } from "./executor.mjs";
 import { transcribeVoice, getVoiceLang, setVoiceLang } from "./voice.mjs";
 import {
   listSessions, setActiveSession, clearActiveSession, getActiveSession,
-  renameSession, getSessionName, deleteSession, getModel, setModel,
+  renameSession, getSessionName, deleteSession, hideSession, unhideSession,
+  bulkHideOlderThan, getChatsWithActiveSession, getModel, setModel,
   getCustomCwd, setCustomCwd,
   addTokens, getTokens, resetTokens, getScopeTokens, resetScopeTokens,
   getWorkingDir,
@@ -69,6 +70,7 @@ let pendingSessionName = null;
 let planMode = false; // false = build (default), true = plan only
 const pendingGroupNaming = new Map(); // chatId → { prompt, meta } — waiting for session name in group
 const pendingNewNaming = new Set(); // chatId — waiting for session name after "New session" button
+const pendingCleanupDays = new Set(); // chatId — waiting for "how many days" input for sessions cleanup
 const cronJobs = []; // [{label, fireAt, timer}]
 const pendingDMText = {}; // chatId → { prompt, timer } — buffer text to combine with following forward
 const pendingPhotos = {}; // chatId → { paths: [], caption, timer, meta } — buffer photos arriving together
@@ -312,14 +314,23 @@ async function downloadTgFile(fileId, ext) {
 
 const PAGE_SIZE = 7;
 
-function buildSessionList(chatId = "default", page = 0) {
-  const { items: sessions, total } = listSessions(PAGE_SIZE, page * PAGE_SIZE);
+function buildSessionList(chatId = "default", page = 0, mode = "active") {
+  const onlyHidden = mode === "hidden";
+  const { items: sessions, total } = listSessions(PAGE_SIZE, page * PAGE_SIZE, { onlyHidden });
   const { activeSessionId } = getActiveSession(chatId);
 
-  if (total === 0) return { text: t("sessions.empty"), buttons: [] };
+  if (total === 0) {
+    if (onlyHidden) {
+      return {
+        text: t("sessions.hidden_empty"),
+        buttons: [[{ text: t("sessions.back_btn"), callback_data: "ses:active:0" }]],
+      };
+    }
+    return { text: t("sessions.empty"), buttons: [] };
+  }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  let text = t("sessions.title");
+  let text = onlyHidden ? t("sessions.hidden_title") : t("sessions.title");
   if (totalPages > 1) text += `<i>Страница ${page + 1}/${totalPages}</i>\n`;
   const buttons = [];
 
@@ -333,20 +344,36 @@ function buildSessionList(chatId = "default", page = 0) {
 
     const shortId = s.sessionId.slice(0, 8);
     const btnLabel = s.displayName || s.lastMessage.slice(0, 25);
-    buttons.push([
-      { text: `${isActive ? "▶️ " : ""}${btnLabel}`, callback_data: `ses:${shortId}` },
-      { text: "🗑", callback_data: `del:${shortId}` },
-    ]);
+    if (onlyHidden) {
+      buttons.push([
+        { text: btnLabel, callback_data: "noop" },
+        { text: "↩️", callback_data: `unhide:${shortId}` },
+      ]);
+    } else {
+      buttons.push([
+        { text: `${isActive ? "▶️ " : ""}${btnLabel}`, callback_data: `ses:${shortId}` },
+        { text: "🗑", callback_data: `del:${shortId}` },
+      ]);
+    }
   }
 
+  const navPrefix = onlyHidden ? "ses:hidden" : "ses:active";
   const nav = [];
-  if (page > 0) nav.push({ text: "← Назад", callback_data: `ses:pg:${page - 1}` });
-  if ((page + 1) < totalPages) nav.push({ text: "Вперёд →", callback_data: `ses:pg:${page + 1}` });
+  if (page > 0) nav.push({ text: "← Назад", callback_data: `${navPrefix}:${page - 1}` });
+  if ((page + 1) < totalPages) nav.push({ text: "Вперёд →", callback_data: `${navPrefix}:${page + 1}` });
   if (nav.length > 0) buttons.push(nav);
 
-  buttons.push([{ text: t("sessions.new_btn"), callback_data: "ses:new" }]);
-  if (activeSessionId) {
-    buttons.push([{ text: t("sessions.detach_btn"), callback_data: "ses:detach" }]);
+  if (onlyHidden) {
+    buttons.push([{ text: t("sessions.back_btn"), callback_data: "ses:active:0" }]);
+  } else {
+    buttons.push([{ text: t("sessions.new_btn"), callback_data: "ses:new" }]);
+    buttons.push([
+      { text: t("sessions.cleanup_btn"), callback_data: "ses:cleanup" },
+      { text: t("sessions.hidden_btn"), callback_data: "ses:hidden:0" },
+    ]);
+    if (activeSessionId) {
+      buttons.push([{ text: t("sessions.detach_btn"), callback_data: "ses:detach" }]);
+    }
   }
 
   return { text, buttons };
@@ -362,8 +389,8 @@ async function showSessions(chatId) {
   });
 }
 
-async function editSessionList(chatId, messageId) {
-  const { text, buttons } = buildSessionList(chatId);
+async function editSessionList(chatId, messageId, page = 0, mode = "active") {
+  const { text, buttons } = buildSessionList(chatId, page, mode);
   await tg("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
@@ -619,17 +646,42 @@ async function handleCallback(cb) {
     return;
   }
 
-  if (data.startsWith("ses:pg:")) {
-    const page = parseInt(data.split(":")[2]) || 0;
-    const { text, buttons } = buildSessionList(chatId, page);
+  if (data === "noop") {
     await tg("answerCallbackQuery", { callback_query_id: cb.id });
-    await tg("editMessageText", {
+    return;
+  }
+
+  if (data.startsWith("ses:active:") || data.startsWith("ses:hidden:")) {
+    const parts = data.split(":");
+    const mode = parts[1]; // "active" | "hidden"
+    const page = parseInt(parts[2]) || 0;
+    await tg("answerCallbackQuery", { callback_query_id: cb.id });
+    await editSessionList(chatId, cb.message.message_id, page, mode);
+    return;
+  }
+
+  if (data === "ses:cleanup") {
+    pendingCleanupDays.add(chatId);
+    await tg("answerCallbackQuery", { callback_query_id: cb.id });
+    await tg("sendMessage", {
       chat_id: chatId,
-      message_id: cb.message.message_id,
-      text,
+      text: t("sessions.cleanup_prompt"),
       parse_mode: "HTML",
-      reply_markup: { inline_keyboard: buttons },
     });
+    return;
+  }
+
+  if (data.startsWith("unhide:")) {
+    const shortId = data.split(":")[1];
+    const { items: hiddenList } = listSessions(1000, 0, { onlyHidden: true });
+    const match = hiddenList.find((s) => s.sessionId.startsWith(shortId));
+    if (match) {
+      unhideSession(match.sessionId);
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.unhidden_ok") });
+      await editSessionList(chatId, cb.message.message_id, 0, "hidden");
+    } else {
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.not_found") });
+    }
     return;
   }
 
@@ -646,12 +698,23 @@ async function handleCallback(cb) {
 
   if (data.startsWith("del:")) {
     const shortId = data.split(":")[1];
-    const { items: sessions } = listSessions(10);
+    const { items: sessions } = listSessions(1000);
     const match = sessions.find((s) => s.sessionId.startsWith(shortId));
     if (match) {
-      deleteSession(match.sessionId, match.projectDir);
-      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.deleted") });
-      // Refresh session list in-place
+      hideSession(match.sessionId, match.projectDir);
+      // If this session was active in any chat, clear and notify
+      const affected = getChatsWithActiveSession([match.sessionId]);
+      for (const cid of affected) {
+        clearActiveSession(cid);
+        try {
+          await tg("sendMessage", {
+            chat_id: cid,
+            text: t("sessions.active_hidden_notice"),
+            parse_mode: "HTML",
+          });
+        } catch {}
+      }
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("sessions.hidden_ok") });
       await editSessionList(chatId, cb.message.message_id);
     }
     return;
@@ -2292,6 +2355,34 @@ async function handleMessage(msg) {
     finalPrompt = `> ${replyText.replace(/\n/g, "\n> ")}\n\n${finalPrompt}`;
   }
   if (planMode) finalPrompt = t("plan.prefix", { prompt: finalPrompt });
+
+  // Cleanup flow: waiting for "how many days" input
+  if (pendingCleanupDays.has(chatId)) {
+    pendingCleanupDays.delete(chatId);
+    const days = parseInt(finalPrompt.trim(), 10);
+    if (!Number.isFinite(days) || days < 0) {
+      await tg("sendMessage", { chat_id: chatId, text: t("sessions.cleanup_invalid") });
+      return;
+    }
+    const hiddenIds = bulkHideOlderThan(days);
+    const affected = getChatsWithActiveSession(hiddenIds);
+    for (const cid of affected) {
+      clearActiveSession(cid);
+      try {
+        await tg("sendMessage", {
+          chat_id: cid,
+          text: t("sessions.active_hidden_notice"),
+          parse_mode: "HTML",
+        });
+      } catch {}
+    }
+    await tg("sendMessage", {
+      chat_id: chatId,
+      text: t("sessions.cleanup_done", { count: hiddenIds.length, days }),
+      parse_mode: "HTML",
+    });
+    return;
+  }
 
   // DM: if waiting for session name after "New session" button
   if (pendingNewNaming.has(chatId)) {
