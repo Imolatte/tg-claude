@@ -93,9 +93,12 @@ Dangerous operations require your approval:
 - Sensitive file edits (`.env`, `docker-compose`, CI configs)
 
 **Dual-channel approval** (terminal sessions):
-1. Terminal shows its normal permission prompt
-2. If unanswered for 5 minutes, Telegram sends inline buttons
-3. Tap Approve/Deny on your phone - terminal prompt resolves automatically via TTY injection
+1. Terminal shows its normal permission prompt (1/2/3)
+2. If unanswered for 5 minutes, Telegram sends a notification
+3. **With tmux** (recommended): Approve/Deny buttons - taps inject `1` or `3` directly into the native prompt via `tmux send-keys`. Session keeps running, no context lost.
+4. **Without tmux**: only a `Take over session` button is offered as fallback. It kills the terminal Claude and resumes the same session in Telegram (context preserved on disk, but in-memory state like the current plan/todos is lost).
+
+> **Tip:** install [tmux](https://github.com/tmux/tmux) (`brew install tmux`) and launch Claude with `tmux new -A -s claude claude` (or add `alias cc='tmux new -A -s claude claude'` to your shell rc). Then dangerous-op approvals from Telegram answer the real terminal prompt without restarting anything. Without tmux only the takeover fallback works.
 
 **Telegram sessions**: inline buttons sent immediately as before.
 

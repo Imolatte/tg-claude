@@ -839,6 +839,53 @@ async function handleCallback(cb) {
     return;
   }
 
+  // ── Tmux approval injection (answer native terminal prompt remotely) ──
+  if (data.startsWith("tmuxap:") || data.startsWith("tmuxdn:")) {
+    const markerPath = "/tmp/claude-tg-pending-approval";
+    const approve = data.startsWith("tmuxap:");
+    try {
+      if (!existsSync(markerPath)) {
+        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: t("approval.already_answered") });
+        return;
+      }
+      const marker = JSON.parse(readFileSync(markerPath, "utf-8"));
+      if (!marker.tmuxPane) {
+        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "No tmux pane recorded" });
+        return;
+      }
+
+      // Native Claude Code prompt: 1 = Yes, 3 = No (single key, no Enter needed)
+      const key = approve ? "1" : "3";
+      try {
+        execSync(`tmux send-keys -t ${JSON.stringify(marker.tmuxPane)} ${key}`, { stdio: "ignore" });
+      } catch (e) {
+        await tg("answerCallbackQuery", { callback_query_id: cb.id, text: `tmux error: ${e.message.slice(0, 80)}` });
+        return;
+      }
+
+      try { unlinkSync(markerPath); } catch {}
+
+      const lang = getLang();
+      const okText = approve
+        ? (lang === "ru" ? "✅ Разрешено" : "✅ Approved")
+        : (lang === "ru" ? "❌ Отклонено" : "❌ Denied");
+
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: okText });
+
+      const origText = cb.message?.text || "";
+      await tg("editMessageText", {
+        chat_id: chatId,
+        message_id: cb.message.message_id,
+        text: `${origText}\n\n<b>${okText}</b>`,
+        parse_mode: "HTML",
+      });
+    } catch (e) {
+      console.error("Tmux approval error:", e.message);
+      await tg("answerCallbackQuery", { callback_query_id: cb.id, text: `Error: ${e.message}` });
+    }
+    return;
+  }
+
   // ── Session takeover from terminal ──
   if (data.startsWith("takeover:")) {
     const markerPath = "/tmp/claude-tg-pending-approval";
@@ -2625,6 +2672,20 @@ function startApprovalWatcher() {
         ? `Ожидает ответа в терминале ${mins} мин`
         : `Waiting for terminal response ${mins} min`;
       const takeoverBtn = lang === "ru" ? "📱 Перехватить сессию" : "📱 Take over session";
+      const approveBtn = lang === "ru" ? "✅ Разрешить" : "✅ Approve";
+      const denyBtn = lang === "ru" ? "❌ Отклонить" : "❌ Deny";
+
+      // If running inside tmux we can inject the answer into the native prompt.
+      // Otherwise the only remote option is full session takeover.
+      const buttons = data.tmuxPane
+        ? [
+            [
+              { text: approveBtn, callback_data: `tmuxap:${data.opId}` },
+              { text: denyBtn, callback_data: `tmuxdn:${data.opId}` },
+            ],
+            [{ text: takeoverBtn, callback_data: `takeover:${data.opId}` }],
+          ]
+        : [[{ text: takeoverBtn, callback_data: `takeover:${data.opId}` }]];
 
       tg("sendMessage", {
         chat_id: OWNER_CHAT_ID,
@@ -2637,11 +2698,7 @@ function startApprovalWatcher() {
           `⏰ <i>${waitText}</i>`,
         ].join("\n"),
         parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [[
-            { text: takeoverBtn, callback_data: `takeover:${data.opId}` },
-          ]],
-        },
+        reply_markup: { inline_keyboard: buttons },
       }).catch(() => {});
 
       data.notified = true;

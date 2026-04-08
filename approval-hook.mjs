@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { execSync } from "child_process";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { t, loadLang, getLang } from "./worker/locale.mjs";
@@ -331,14 +332,26 @@ async function main() {
   }
 
   // Terminal mode → write marker file and exit (Claude Code shows its own prompt)
-  // Worker watches for unanswered markers and offers session takeover after 5 min
+  // Worker watches for unanswered markers and offers session takeover after 5 min.
+  // If running inside tmux, also record the pane id so the worker can inject the
+  // answer (1/3) directly into the native prompt via `tmux send-keys`.
   if (process.env.CLAUDE_SOURCE !== "telegram") {
     const detail = getDetail(toolName, toolInput);
     const opId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    let tmuxPane = null;
+    if (process.env.TMUX) {
+      try {
+        tmuxPane = execSync("tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'", {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim() || null;
+      } catch {}
+    }
+
     writeFileSync("/tmp/claude-tg-pending-approval", JSON.stringify({
       toolName, detail: detail.slice(0, 300), ts: Date.now(), opId,
-      claudePid: process.ppid,
+      claudePid: process.ppid, tmuxPane,
     }));
 
     // Exit with no decision → terminal prompt shows as usual
