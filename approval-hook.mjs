@@ -52,18 +52,17 @@ function makeDecision(approved, reason) {
 // ── Classification ──────────────────────────────────────────────────
 
 const DANGEROUS_COMMANDS = [
-  "git push", "git reset", "git rebase", "git merge", "git checkout --",
-  "git clean", "git branch -D", "git branch -d",
-  "rm ", "rm -rf", "rm -r", "docker rm", "docker stop", "docker system prune",
+  "rm -rf", "rm -r", "rm ",
+  "git reset --hard", "git push --force", "git push -f",
+  "git checkout --", "git clean -f", "git branch -D",
+  "docker system prune",
   "npx prisma migrate deploy", "npx prisma db push", "npx prisma migrate reset",
   "drop table", "drop database", "truncate",
   "vercel --prod", "npm publish",
 ];
 
 const SENSITIVE_FILES = [
-  /\.env/, /docker-compose/, /Dockerfile/, /\.github\//,
-  /prisma\/migrations/, /package\.json$/, /tsconfig.*\.json$/,
-  /next\.config/, /vercel\.json/, /\.npmrc/, /\.gitignore$/,
+  /\.env/, /prisma\/migrations/, /\.github\//, /vercel\.json/, /\.npmrc/,
 ];
 
 function isRemoteCommand(cmd) {
@@ -292,8 +291,9 @@ async function main() {
   // Clean up pending approval marker - if we're here, previous approval was answered in terminal
   try { unlinkSync("/tmp/claude-tg-pending-approval"); } catch {}
 
-  // For terminal Claude: send activity indicators to TG so user knows work is happening
-  if (process.env.CLAUDE_SOURCE !== "telegram") {
+  // For terminal Claude: send activity indicators to TG so user knows work is happening.
+  // Set CLAUDE_TG_QUIET=1 in shell when working locally at the Mac to skip indicators.
+  if (process.env.CLAUDE_SOURCE !== "telegram" && process.env.CLAUDE_TG_QUIET !== "1") {
     sendTypingIndicator();
     sendWorkingNotification(toolName);
   }

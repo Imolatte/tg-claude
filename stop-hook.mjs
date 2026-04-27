@@ -72,7 +72,14 @@ async function main() {
 
   if (!preview) process.exit(0);
 
-  const text = `✅ <b>Done</b>\n\n${esc(preview)}`;
+  // Skip trivial Q/A (short reply + no error keywords) to reduce TG spam
+  const errorKeywords = /error|failed|не удалось|ошибка|crash|traceback|exception/i;
+  const hasError = errorKeywords.test(preview);
+  if (preview.length < 400 && !hasError) process.exit(0);
+
+  const icon = hasError ? "⚠️" : "✅";
+  const label = hasError ? "Issue" : "Done";
+  const text = `${icon} <b>${label}</b>\n\n${esc(preview)}`;
 
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
